@@ -77,7 +77,7 @@ def main() -> None:
     with (out_dir / "summary" / "manifest.json").open("w", encoding="utf-8") as fh:
         json.dump(
             {
-                "method": "JointEnKF sensitivity",
+                "method": "EnKF sensitivity",
                 "theta_rw_grid": [float(v) for v in args.theta_rw_grid],
                 "beta_rw_grid": [float(v) for v in args.beta_rw_grid],
                 "inflation_grid": [float(v) for v in args.inflation_grid],

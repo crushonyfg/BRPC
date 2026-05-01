@@ -3,9 +3,9 @@
 Primary runners:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_suddenCmp_tryThm --profile main --out_dir figs/sudden_main
-conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile main --out_dir figs/slope_main
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --profile main --out_dir figs/mixed_main
+conda run -n BRPC python -m calib.experiment_synthetic_sudden --profile main --out_dir figs/sudden_main
+conda run -n BRPC python -m calib.experiment_synthetic_slope --profile main --out_dir figs/slope_main
+conda run -n BRPC python -m calib.experiment_synthetic_mixed --profile main --out_dir figs/mixed_main
 ```
 
 Use `--profile ablation` for method-table ablations when the runner supports it.

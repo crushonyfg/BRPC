@@ -29,6 +29,7 @@ from .run_synthetic_mixed_thetaCmp import (
     _summarize_restart_events as summarize_mixed_restart_events,
     run_one_mixed,
 )
+from .method_names import paper_method_name
 
 
 RAW_FIELDNAMES = [
@@ -85,6 +86,10 @@ class MethodSpec:
     family: str
     cpd: str
     meta: Dict[str, Any]
+
+
+def _shared_method_name(family: str, cpd: str) -> str:
+    return paper_method_name(f"{family}_{cpd}")
 
 
 def _slug(text: Any) -> str:
@@ -170,9 +175,9 @@ def build_method_specs(num_particles: int, delta_bpc_lambda: float) -> List[Meth
 
     methods.append(
         MethodSpec(
-            run_key="HalfRefit",
-            method="HalfRefit",
-            family="HalfRefit",
+            run_key="B-BRPC-RRA",
+            method="B-BRPC-RRA",
+            family="B-BRPC-RRA",
             cpd="BOCPD",
             meta=dict(
                 base,
@@ -203,9 +208,9 @@ def build_method_specs(num_particles: int, delta_bpc_lambda: float) -> List[Meth
 
     methods.append(
         MethodSpec(
-            run_key="WardPFMove_BOCPD",
-            method="WardPFMove_BOCPD",
-            family="WardPFMove",
+            run_key="B-WaldPF",
+            method="B-WaldPF",
+            family="B-WaldPF",
             cpd="BOCPD",
             meta=dict(
                 type="bocpd_paper_pf",
@@ -219,7 +224,7 @@ def build_method_specs(num_particles: int, delta_bpc_lambda: float) -> List[Meth
 
     shared_variants = [
         ("Proxy", "online_bpc_proxy_stablemean", ("None", "BOCPD", "wCUSUM")),
-        ("Exact", "online_bpc_exact", ("BOCPD", "wCUSUM")),
+        ("Exact", "online_bpc_exact", ("None", "BOCPD", "wCUSUM")),
         ("FixedSupport", "online_bpc_fixedsupport_exact", ("None", "BOCPD", "wCUSUM")),
     ]
     for family, delta_mode, cpds in shared_variants:
@@ -233,9 +238,9 @@ def build_method_specs(num_particles: int, delta_bpc_lambda: float) -> List[Meth
             )
             methods.append(
                 MethodSpec(
-                    run_key=f"{family}_{cpd}",
-                    method=f"{family}_{cpd}",
-                    family=family,
+                    run_key=_shared_method_name(family, cpd),
+                    method=_shared_method_name(family, cpd),
+                    family=_shared_method_name(family, cpd) if cpd != "None" else family,
                     cpd=cpd,
                     meta=meta,
                 )
@@ -270,9 +275,9 @@ def build_method_specs(num_particles: int, delta_bpc_lambda: float) -> List[Meth
                 meta=dict(type="pf_ogp"),
             ),
             MethodSpec(
-                run_key="SlidingWindow-KOH",
-                method="SlidingWindow-KOH",
-                family="SlidingWindow-KOH",
+                run_key="BC",
+                method="BC",
+                family="BC",
                 cpd="None",
                 meta=dict(type="bc"),
             ),
@@ -807,7 +812,7 @@ def main() -> None:
 
     method_specs = build_method_specs(num_particles=args.num_particles, delta_bpc_lambda=args.delta_bpc_lambda)
     if args.methods:
-        keep = set(args.methods)
+        keep = {paper_method_name(m) for m in args.methods}
         method_specs = [spec for spec in method_specs if spec.method in keep or spec.run_key in keep]
         missing = sorted(keep - {spec.method for spec in method_specs} - {spec.run_key for spec in method_specs})
         if missing:

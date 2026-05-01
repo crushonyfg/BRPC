@@ -10,17 +10,17 @@ import pandas as pd
 
 MAIN_METHODS = [
     "HalfRefit",
-    "Proxy_None",
-    "Proxy_BOCPD",
-    "Proxy_wCUSUM",
-    "Exact_BOCPD",
-    "Exact_wCUSUM",
-    "FixedSupport_None",
-    "FixedSupport_BOCPD",
-    "FixedSupport_wCUSUM",
+    "BRPC-P",
+    "B-BRPC-P",
+    "C-BRPC-P",
+    "B-BRPC-E",
+    "C-BRPC-E",
+    "BRPC-F",
+    "B-BRPC-F",
+    "C-BRPC-F",
     "ParticleFixedSupport_None",
-    "ParticleFixedSupport_BOCPD",
-    "ParticleFixedSupport_wCUSUM",
+    "ParticleB-BRPC-F",
+    "ParticleC-BRPC-F",
 ]
 
 
@@ -31,7 +31,7 @@ FAMILY_COLORS: Dict[str, str] = {
     "FixedSupport": "#2ca02c",
     "ParticleFixedSupport": "#9467bd",
     "PF-OGP": "#ff7f0e",
-    "SlidingWindow-KOH": "#8c564b",
+    "BC": "#8c564b",
     "BOCPD-PF-OGP": "#7f7f7f",
 }
 

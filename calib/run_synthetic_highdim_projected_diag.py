@@ -20,19 +20,22 @@ from .configs import CalibrationConfig
 from .emulator import DeterministicSimulator
 from .online_calibrator import OnlineBayesCalibrator, crps_gaussian
 from .paper_pf_digital_twin import WardPaperPFVectorConfig, WardPaperParticleFilterVector
+from .method_names import method_aliases, paper_method_name
 
 
 PAPER_LABELS = {
     "DA": "DA",
-    "FixedSupport_None": "BRPC-F",
-    "FixedSupport_BOCPD": "B-BRPC-F",
-    "FixedSupport_wCUSUM": "C-BRPC-F",
-    "Exact_BOCPD": "B-BRPC-E",
-    "Exact_wCUSUM": "C-BRPC-E",
-    "Proxy_BOCPD": "B-BRPC-P",
-    "Proxy_wCUSUM": "C-BRPC-P",
-    "HalfRefit_BOCPD": "B-BRPC-RRA",
-    "SlidingWindow-KOH": "BC",
+    "BRPC-P": "BRPC-P",
+    "BRPC-E": "BRPC-E",
+    "BRPC-F": "BRPC-F",
+    "B-BRPC-F": "B-BRPC-F",
+    "C-BRPC-F": "C-BRPC-F",
+    "B-BRPC-E": "B-BRPC-E",
+    "C-BRPC-E": "C-BRPC-E",
+    "B-BRPC-P": "B-BRPC-P",
+    "C-BRPC-P": "C-BRPC-P",
+    "B-BRPC-RRA": "B-BRPC-RRA",
+    "BC": "BC",
 }
 
 
@@ -811,19 +814,25 @@ def save_combined_theta_tracking_from_rows(out_dir: Path, rows: Sequence[Dict[st
 
 
 def method_specs() -> Dict[str, Dict[str, object]]:
-    return {
+    specs = {
         "DA": dict(kind="paper_pf_vector", paper_label=PAPER_LABELS["DA"]),
         "DA_Analogue": dict(kind="da", paper_label="DA-analogue"),
-        "FixedSupport_None": dict(kind="bocpd", delta_mode="online_bpc_fixedsupport_exact", controller="none", paper_label=PAPER_LABELS["FixedSupport_None"]),
-        "FixedSupport_BOCPD": dict(kind="bocpd", delta_mode="online_bpc_fixedsupport_exact", controller="BOCPD", paper_label=PAPER_LABELS["FixedSupport_BOCPD"]),
-        "FixedSupport_wCUSUM": dict(kind="bocpd", delta_mode="online_bpc_fixedsupport_exact", controller="wCUSUM", paper_label=PAPER_LABELS["FixedSupport_wCUSUM"]),
-        "Exact_BOCPD": dict(kind="bocpd", delta_mode="online_bpc_exact", controller="BOCPD", paper_label=PAPER_LABELS["Exact_BOCPD"]),
-        "Exact_wCUSUM": dict(kind="bocpd", delta_mode="online_bpc_exact", controller="wCUSUM", paper_label=PAPER_LABELS["Exact_wCUSUM"]),
-        "Proxy_BOCPD": dict(kind="bocpd", delta_mode="online_bpc_proxy_stablemean", controller="BOCPD", paper_label=PAPER_LABELS["Proxy_BOCPD"]),
-        "Proxy_wCUSUM": dict(kind="bocpd", delta_mode="online_bpc_proxy_stablemean", controller="wCUSUM", paper_label=PAPER_LABELS["Proxy_wCUSUM"]),
-        "HalfRefit_BOCPD": dict(kind="bocpd", delta_mode="refit", controller="BOCPD", paper_label=PAPER_LABELS["HalfRefit_BOCPD"]),
-        "SlidingWindow-KOH": dict(kind="bc", paper_label=PAPER_LABELS["SlidingWindow-KOH"]),
+        "BRPC-P": dict(kind="bocpd", delta_mode="online_bpc_proxy_stablemean", controller="none", paper_label=PAPER_LABELS["BRPC-P"]),
+        "BRPC-E": dict(kind="bocpd", delta_mode="online_bpc_exact", controller="none", paper_label=PAPER_LABELS["BRPC-E"]),
+        "BRPC-F": dict(kind="bocpd", delta_mode="online_bpc_fixedsupport_exact", controller="none", paper_label=PAPER_LABELS["BRPC-F"]),
+        "B-BRPC-F": dict(kind="bocpd", delta_mode="online_bpc_fixedsupport_exact", controller="BOCPD", paper_label=PAPER_LABELS["B-BRPC-F"]),
+        "C-BRPC-F": dict(kind="bocpd", delta_mode="online_bpc_fixedsupport_exact", controller="wCUSUM", paper_label=PAPER_LABELS["C-BRPC-F"]),
+        "B-BRPC-E": dict(kind="bocpd", delta_mode="online_bpc_exact", controller="BOCPD", paper_label=PAPER_LABELS["B-BRPC-E"]),
+        "C-BRPC-E": dict(kind="bocpd", delta_mode="online_bpc_exact", controller="wCUSUM", paper_label=PAPER_LABELS["C-BRPC-E"]),
+        "B-BRPC-P": dict(kind="bocpd", delta_mode="online_bpc_proxy_stablemean", controller="BOCPD", paper_label=PAPER_LABELS["B-BRPC-P"]),
+        "C-BRPC-P": dict(kind="bocpd", delta_mode="online_bpc_proxy_stablemean", controller="wCUSUM", paper_label=PAPER_LABELS["C-BRPC-P"]),
+        "B-BRPC-RRA": dict(kind="bocpd", delta_mode="refit", controller="BOCPD", paper_label=PAPER_LABELS["B-BRPC-RRA"]),
+        "BC": dict(kind="bc", paper_label=PAPER_LABELS["BC"]),
     }
+    for legacy, paper in method_aliases().items():
+        if paper in specs and legacy not in specs:
+            specs[legacy] = dict(specs[paper], alias_for=paper)
+    return specs
 
 
 def run_one_method(
@@ -1226,7 +1235,7 @@ def write_summaries(out_dir: Path, rows: List[Dict[str, float]]) -> None:
     with (summary_dir / "manifest.json").open("w", encoding="utf-8") as fh:
         json.dump(
             {
-                "method": "FixedSupport_BOCPD",
+                "method": "B-BRPC-F",
                 "paper_label": "B-BRPC-F",
                 "data_modes": sorted(run_df["data_mode"].unique().tolist()) if "data_mode" in run_df.columns else ["orthogonalized_rff"],
                 "scenarios": sorted(run_df["scenario"].unique().tolist()),
@@ -1252,7 +1261,7 @@ def main() -> None:
     parser.add_argument("--num_rff", type=int, default=10)
     parser.add_argument("--discrepancy_amp", type=float, default=0.3)
     parser.add_argument("--noise_sd", type=float, default=0.05)
-    parser.add_argument("--methods", nargs="+", default=["FixedSupport_BOCPD"])
+    parser.add_argument("--methods", nargs="+", default=["B-BRPC-F"])
     parser.add_argument("--data_mode", choices=["orthogonalized_rff", "physical_projected"], default="orthogonalized_rff")
     parser.add_argument("--projection_ref_size", type=int, default=50000)
     parser.add_argument("--projection_ridge", type=float, default=1e-6)
@@ -1287,7 +1296,7 @@ def main() -> None:
     )
 
     valid_methods = method_specs().keys()
-    methods = list(args.methods)
+    methods = [paper_method_name(m) for m in args.methods]
     for m in methods:
         if m not in valid_methods:
             raise ValueError(f"Unknown method {m}. Valid methods: {sorted(valid_methods)}")
@@ -1298,7 +1307,7 @@ def main() -> None:
             for seed in range(int(args.seed_offset), int(args.seed_offset) + int(args.seed_count)):
                 print(f"[highdim] scenario={scenario} method={method_name} seed={seed}")
                 controller_overrides: Dict[str, float] = {}
-                if method_name == "FixedSupport_wCUSUM":
+                if method_name == "C-BRPC-F":
                     if args.wcusum_threshold is not None:
                         controller_overrides["wcusum_threshold"] = float(args.wcusum_threshold)
                     if args.wcusum_window is not None:

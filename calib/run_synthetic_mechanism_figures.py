@@ -1,4 +1,4 @@
-﻿"""Mechanism-figure runner for synthetic discrepancy update ablations.
+"""Mechanism-figure runner for synthetic discrepancy update ablations.
 
 Runs a focused BOCPD half-discrepancy method set across sudden, gradual-drift,
 and random-walk synthetic regimes. It saves per-batch mechanism diagnostics,
@@ -6,24 +6,24 @@ raw run payloads, and figures for prediction-error decomposition, residual
 coherence, expert evidence, run-length posterior mass, and restart-centered
 behavior.
 
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --method-set shared --seeds 0 1 2 --out_dir figs/mechanism_shared
-conda run -n jumpGP python -m py_compile calib\run_synthetic_mechanism_figures.py
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --smoke --out_dir figs/mechanism_figures_check2
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden --seeds 0 --methods half_online half_onlineDynamic particleGP_online --batch-size 10 --sudden-seg-len 20 --num-particles 48 --max-experts 3 --oracle-grid-size 80 --phi2-grid-size 80 --delta-online-init-max-iter 2 --event-window 2 --restart-window 2 --out_dir figs/mechanism_figures_check_online
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --method-set shared --seeds 0 1 2 --out_dir figs/mechanism_shared
+conda run -n BRPC python -m py_compile calib\run_synthetic_mechanism_figures.py
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --smoke --out_dir figs/mechanism_figures_check2
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden --seeds 0 --methods half_online half_onlineDynamic particleGP_online --batch-size 10 --sudden-seg-len 20 --num-particles 48 --max-experts 3 --oracle-grid-size 80 --phi2-grid-size 80 --delta-online-init-max-iter 2 --event-window 2 --restart-window 2 --out_dir figs/mechanism_figures_check_online
 
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set core --seeds 0 1 2 3 4 --plot-all-seeds --plot-all-heatmaps --plot-all-runlengths --out_dir figs/mechanism_figures_full
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set basis_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_basis20_fixedhyper_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set inducing_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_inducing_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set mc_inducing_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_mc_inducing_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_exact_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_exact_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_exact_hyper_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_exact_hyper_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_proxy_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_proxy_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_proxy_stable_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_proxy_stable_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_proxy_sigmaobs_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_proxy_sigmaobs_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_sigmaobs_best_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_sigmaobs_best_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_fixedsupport_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_fixedsupport_ablation
-conda run -n jumpGP python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_controller_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_controller_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set core --seeds 0 1 2 3 4 --plot-all-seeds --plot-all-heatmaps --plot-all-runlengths --out_dir figs/mechanism_figures_full
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set basis_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_basis20_fixedhyper_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set inducing_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_inducing_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set mc_inducing_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_mc_inducing_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_exact_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_exact_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_exact_hyper_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_exact_hyper_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_proxy_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_proxy_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_proxy_stable_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_proxy_stable_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_proxy_sigmaobs_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_proxy_sigmaobs_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_sigmaobs_best_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_sigmaobs_best_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_fixedsupport_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_fixedsupport_ablation
+conda run -n BRPC python -m calib.run_synthetic_mechanism_figures --scenarios sudden slope random_walk --method-set online_bpc_controller_ablation --seeds 0 1 2 3 4 --plot-all-seeds --out_dir figs/mechanism_figures_online_bpc_controller_ablation
 
 
 """

@@ -263,34 +263,34 @@ COLORS = {
     "BC": "#e74c3c",
     "DA": "#2980b9",
     "Ours": "#27ae60",
-    "Proxy_BOCPD": "#1f77b4",
-    "Proxy_wCUSUM": "#17becf",
-    "Exact_BOCPD": "#d62728",
-    "Exact_wCUSUM": "#ff7f0e",
-    "FixedSupport_BOCPD": "#2ca02c",
-    "FixedSupport_wCUSUM": "#9467bd",
+    "B-BRPC-P": "#1f77b4",
+    "C-BRPC-P": "#17becf",
+    "B-BRPC-E": "#d62728",
+    "C-BRPC-E": "#ff7f0e",
+    "B-BRPC-F": "#2ca02c",
+    "C-BRPC-F": "#9467bd",
 }
 MARKERS = {
     "BC": "o",
     "DA": "s",
     "Ours": "^",
-    "Proxy_BOCPD": "o",
-    "Proxy_wCUSUM": "D",
-    "Exact_BOCPD": "s",
-    "Exact_wCUSUM": "P",
-    "FixedSupport_BOCPD": "^",
-    "FixedSupport_wCUSUM": "X",
+    "B-BRPC-P": "o",
+    "C-BRPC-P": "D",
+    "B-BRPC-E": "s",
+    "C-BRPC-E": "P",
+    "B-BRPC-F": "^",
+    "C-BRPC-F": "X",
 }
 PLOT_ORDER = [
     "BC",
     "DA",
     "Ours",
-    "Proxy_BOCPD",
-    "Proxy_wCUSUM",
-    "Exact_BOCPD",
-    "Exact_wCUSUM",
-    "FixedSupport_BOCPD",
-    "FixedSupport_wCUSUM",
+    "B-BRPC-P",
+    "C-BRPC-P",
+    "B-BRPC-E",
+    "C-BRPC-E",
+    "B-BRPC-F",
+    "C-BRPC-F",
 ]
 
 
@@ -347,8 +347,8 @@ def _build_cpd_methods() -> Dict[str, dict]:
         delta_bpc_predict_add_kernel_noise=False,
     )
     return {
-        "Proxy_BOCPD": dict(base, mode="restart", delta_update_mode="online_bpc_proxy_stablemean"),
-        "Proxy_wCUSUM": dict(
+        "B-BRPC-P": dict(base, mode="restart", delta_update_mode="online_bpc_proxy_stablemean"),
+        "C-BRPC-P": dict(
             base,
             mode="wcusum",
             controller_name="wcusum",
@@ -360,8 +360,8 @@ def _build_cpd_methods() -> Dict[str, dict]:
             controller_wcusum_sigma_floor=0.25,
             delta_update_mode="online_bpc_proxy_stablemean",
         ),
-        "Exact_BOCPD": dict(base, mode="restart", delta_update_mode="online_bpc_exact"),
-        "Exact_wCUSUM": dict(
+        "B-BRPC-E": dict(base, mode="restart", delta_update_mode="online_bpc_exact"),
+        "C-BRPC-E": dict(
             base,
             mode="wcusum",
             controller_name="wcusum",
@@ -373,8 +373,8 @@ def _build_cpd_methods() -> Dict[str, dict]:
             controller_wcusum_sigma_floor=0.25,
             delta_update_mode="online_bpc_exact",
         ),
-        "FixedSupport_BOCPD": dict(base, mode="restart", delta_update_mode="online_bpc_fixedsupport_exact"),
-        "FixedSupport_wCUSUM": dict(
+        "B-BRPC-F": dict(base, mode="restart", delta_update_mode="online_bpc_fixedsupport_exact"),
+        "C-BRPC-F": dict(
             base,
             mode="wcusum",
             controller_name="wcusum",

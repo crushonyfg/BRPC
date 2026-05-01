@@ -156,11 +156,11 @@ def run_one(
 
     raw_dir = out_dir / "raw_runs"
     raw_dir.mkdir(parents=True, exist_ok=True)
-    tag = f"mode{mode}_seed{seed}_bs{batch_size}_JointEnKF"
+    tag = f"mode{mode}_seed{seed}_bs{batch_size}_EnKF"
     raw_path = raw_dir / f"{tag}.pt"
     torch.save(
         dict(
-            method="JointEnKF",
+            method="EnKF",
             dataset="plantsim",
             mode=int(mode),
             seed=int(seed),
@@ -182,7 +182,7 @@ def run_one(
     plot_dir.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(10.5, 4.5))
     plt.plot(gt_theta_arr, "k--", lw=2.0, label="physical theta")
-    plt.plot(theta_arr, color="tab:blue", lw=1.8, label="JointEnKF")
+    plt.plot(theta_arr, color="tab:blue", lw=1.8, label="EnKF")
     plt.xlabel("batch index")
     plt.ylabel("theta raw")
     plt.title(f"PlantSim Joint EnKF theta tracking (mode={mode}, seed={seed})")
@@ -197,7 +197,7 @@ def run_one(
     return dict(
         dataset="plantsim",
         scenario=f"mode{mode}",
-        method="JointEnKF",
+        method="EnKF",
         seed=int(seed),
         batch_size=int(batch_size),
         max_batches=float(max_batches) if max_batches is not None else np.nan,
@@ -305,7 +305,7 @@ def main() -> None:
             with (summary_dir / "manifest.json").open("w", encoding="utf-8") as fh:
                 json.dump(
                     dict(
-                        method="JointEnKF",
+                        method="EnKF",
                         notes="Joint EnKF baseline over standardized PlantSim theta and RFF discrepancy-basis coefficients.",
                         modes=[int(m) for m in args.modes],
                         seeds=sorted(run_df["seed"].unique().tolist()),

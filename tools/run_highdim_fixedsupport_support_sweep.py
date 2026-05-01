@@ -27,7 +27,7 @@ def run_grid() -> List[Dict[str, object]]:
     for num_support in (32, 64, 128, 256):
         rows.append(
             dict(
-                method_name="FixedSupport_BOCPD",
+                method_name="B-BRPC-F",
                 run_name=f"B-BRPC-F_h400_m2_c20_ns{num_support}",
                 num_support=int(num_support),
                 controller_overrides=dict(hazard_lambda=400.0, restart_margin=2.0, restart_cooldown=20),
@@ -35,7 +35,7 @@ def run_grid() -> List[Dict[str, object]]:
         )
         rows.append(
             dict(
-                method_name="FixedSupport_BOCPD",
+                method_name="B-BRPC-F",
                 run_name=f"B-BRPC-F_h400_m2_c640_ns{num_support}",
                 num_support=int(num_support),
                 controller_overrides=dict(hazard_lambda=400.0, restart_margin=2.0, restart_cooldown=640),
@@ -43,7 +43,7 @@ def run_grid() -> List[Dict[str, object]]:
         )
         rows.append(
             dict(
-                method_name="FixedSupport_wCUSUM",
+                method_name="C-BRPC-F",
                 run_name=f"C-BRPC-F_w4_t025_k025_sf025_ns{num_support}",
                 num_support=int(num_support),
                 controller_overrides=dict(wcusum_window=4, wcusum_threshold=0.25, wcusum_kappa=0.25, wcusum_sigma_floor=0.25),

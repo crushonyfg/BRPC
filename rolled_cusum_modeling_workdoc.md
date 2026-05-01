@@ -405,7 +405,7 @@ Whenever rolled-CUSUM code changes, update this document with:
 
 ## 12. Example smoke-test style
 
-Use the `jumpGP` environment.
+Use the `BRPC` environment.
 Prefer a short synthetic run that exercises the modified branch, for example a small `run_one_slope(...)` call with one method entry.
 
 The goal of the smoke test is not to validate final metrics.
@@ -419,7 +419,7 @@ It is to verify that:
 ## 13. Runner Invocation Reference
 
 These are the current recommended command-line entrypoints for the synthetic rolled-CUSUM experiments.
-Use the `jumpGP` environment.
+Use the `BRPC` environment.
 
 ### 13.1 Gradual drift main/ablation/appendix
 
@@ -442,9 +442,9 @@ Supported profiles:
 Example commands:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile main --out_dir figs/slope_main
-conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile ablation --out_dir figs/slope_ablation
-conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile appendix --out_dir figs/slope_appendix
+conda run -n BRPC python -m calib.experiment_synthetic_slope --profile main --out_dir figs/slope_main
+conda run -n BRPC python -m calib.experiment_synthetic_slope --profile ablation --out_dir figs/slope_ablation
+conda run -n BRPC python -m calib.experiment_synthetic_slope --profile appendix --out_dir figs/slope_appendix
 ```
 
 ### 13.2 Sudden change main/ablation
@@ -466,8 +466,8 @@ Supported profiles:
 Example commands:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_suddenCmp_tryThm --profile main --out_dir figs/sudden_main
-conda run -n jumpGP python -m calib.run_synthetic_suddenCmp_tryThm --profile ablation --out_dir figs/sudden_ablation
+conda run -n BRPC python -m calib.experiment_synthetic_sudden --profile main --out_dir figs/sudden_main
+conda run -n BRPC python -m calib.experiment_synthetic_sudden --profile ablation --out_dir figs/sudden_ablation
 ```
 
 ### 13.3 Mixed gradual-plus-sudden runner
@@ -493,9 +493,9 @@ Supported profiles and preview entrypoints:
 Example commands:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --preview_only --out_dir figs/mixed_preview
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --profile main --out_dir figs/mixed_main
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --profile ablation --out_dir figs/mixed_ablation
+conda run -n BRPC python -m calib.experiment_synthetic_mixed --preview_only --out_dir figs/mixed_preview
+conda run -n BRPC python -m calib.experiment_synthetic_mixed --profile main --out_dir figs/mixed_main
+conda run -n BRPC python -m calib.experiment_synthetic_mixed --profile ablation --out_dir figs/mixed_ablation
 ```
 
 ### 13.4 Output conventions
@@ -569,9 +569,9 @@ PF state and BOCPD structure are otherwise left unchanged by the online discrepa
 
 The online ablation methods are wired into these runners:
 
-- `conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --profile ablation --out_dir ...`
-- `conda run -n jumpGP python -m calib.run_synthetic_suddenCmp_tryThm --profile ablation --out_dir ...`
-- `conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile ablation --out_dir ...`
+- `conda run -n BRPC python -m calib.experiment_synthetic_mixed --profile ablation --out_dir ...`
+- `conda run -n BRPC python -m calib.experiment_synthetic_sudden --profile ablation --out_dir ...`
+- `conda run -n BRPC python -m calib.experiment_synthetic_slope --profile ablation --out_dir ...`
 
 The CLI entrypoints are unchanged; the new behavior is selected by the method table entries inside each runner.
 
@@ -722,9 +722,9 @@ The synthetic runners now expose dynamic-online variants with explicit names suc
 The corresponding runner entrypoints remain the same:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --profile ablation --out_dir figs/mixed_ablation_dynamic
-conda run -n jumpGP python -m calib.run_synthetic_suddenCmp_tryThm --profile ablation --out_dir figs/sudden_ablation_dynamic
-conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile ablation --out_dir figs/slope_ablation_dynamic
+conda run -n BRPC python -m calib.experiment_synthetic_mixed --profile ablation --out_dir figs/mixed_ablation_dynamic
+conda run -n BRPC python -m calib.experiment_synthetic_sudden --profile ablation --out_dir figs/sudden_ablation_dynamic
+conda run -n BRPC python -m calib.experiment_synthetic_slope --profile ablation --out_dir figs/slope_ablation_dynamic
 ```
 
 ### 14.9 Interpretation summary
@@ -854,13 +854,13 @@ The intent is:
 Example:
 
 ```bash
-conda run -n jumpGP python -m calib.run_plantSim_v3_std --out_dir figs/plantSim_example --profile half_exact_da_bc --modes 0 1 2 --batch_size 4 --num_particles 1024 --seeds 13 --max-batches-by-mode 1:250
+conda run -n BRPC python -m calib.experiment_plantsim --out_dir figs/plantSim_example --profile half_exact_da_bc --modes 0 1 2 --batch_size 4 --num_particles 1024 --seeds 13 --max-batches-by-mode 1:250
 ```
 
 Move-step DA variant example:
 
 ```bash
-conda run -n jumpGP python -m calib.run_plantSim_v3_std --out_dir figs/plantSim_example_damove --profile half_exact_damove_bc --modes 0 1 2 --batch_size 4 --num_particles 1024 --seeds 13
+conda run -n BRPC python -m calib.experiment_plantsim --out_dir figs/plantSim_example_damove --profile half_exact_damove_bc --modes 0 1 2 --batch_size 4 --num_particles 1024 --seeds 13
 ```
 
 For this profile, `DA` means the generalized Ward-style paper PF with move-step:
@@ -878,7 +878,7 @@ For this profile, `DA` means the generalized Ward-style paper PF with move-step:
 For one-off paper-style theta-tracking figures on synthetic data, use:
 
 ```bash
-conda run -n jumpGP python tools/run_synthetic_theta_tracking_bundle.py --out_dir figs/synthetic_theta_tracking_bundle_example --num-particles 1024 --delta-bpc-lambda 2
+conda run -n BRPC python tools/run_synthetic_theta_tracking_bundle.py --out_dir figs/synthetic_theta_tracking_bundle_example --num-particles 1024 --delta-bpc-lambda 2
 ```
 
 This tool runs one representative configuration for:
@@ -969,7 +969,7 @@ It writes:
 Example command:
 
 ```bash
-conda run -n jumpGP python tools/run_ward_pf_vs_brpce.py \
+conda run -n BRPC python tools/run_ward_pf_vs_brpce.py \
   --out_dir figs/wardpf_vs_brpce_20260425 \
   --num-particles 1024 \
   --delta-bpc-lambda 2 \
@@ -1026,7 +1026,7 @@ This is a reporting convention for synthetic baseline comparisons. It does **not
 To run the synthetic large-experiment grid for the default `DA` baseline only:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_cpd_suite \
+conda run -n BRPC python -m calib.experiment_synthetic_cpd_suite \
   --out_dir figs/synthetic_cpd_suite_da_seed5_np1024 \
   --scenario all \
   --seed_count 5 \
@@ -1092,7 +1092,7 @@ This path exists to compare BOCPD over Ward-style PF memory against exact online
 Example 5-seed large-experiment command:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_cpd_suite \
+conda run -n BRPC python -m calib.experiment_synthetic_cpd_suite \
   --out_dir figs/wardpfmove_bocpd_vs_exact_seed5_np1024_lambda2 \
   --scenario all \
   --seed_count 5 \
@@ -1135,7 +1135,7 @@ For any synthetic experiment that saves per-run raw payloads:
 Generic postprocess tool for suite-style outputs:
 
 ```bash
-conda run -n jumpGP python tools/plot_synthetic_theta_tracking_from_raw_runs.py \
+conda run -n BRPC python tools/plot_synthetic_theta_tracking_from_raw_runs.py \
   --suite_dir figs/<synthetic_suite_dir>
 ```
 
@@ -1150,7 +1150,7 @@ Expected outputs:
 A dedicated high-dimensional synthetic diagnostic runner is available:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
+conda run -n BRPC python -m calib.experiment_highdim_projected \
   --out_dir figs/highdim_projected_diag_brpcf \
   --scenarios all \
   --seed_count 5 \
@@ -1248,7 +1248,7 @@ Notes on scale:
 Representative multi-method command:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
+conda run -n BRPC python -m calib.experiment_highdim_projected \
   --out_dir figs/highdim_projected_diag_compare \
   --scenarios all \
   --seed_count 1 \
@@ -1264,7 +1264,7 @@ conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
 Representative physical-projected command for `DA`, `BC`, and `C-BRPC-F(lambda=1,t=0.35)`:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
+conda run -n BRPC python -m calib.experiment_highdim_projected \
   --out_dir figs/highdim_physical_projected_diag_l1_t035 \
   --data_mode physical_projected \
   --scenarios all \
@@ -1286,7 +1286,7 @@ conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
 Stronger jump physical-projected variant:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
+conda run -n BRPC python -m calib.experiment_highdim_projected \
   --out_dir figs/highdim_physical_projected_diag_strongjump_l1_t025_seed5 \
   --data_mode physical_projected \
   --scenarios sudden mixed \
@@ -1310,7 +1310,7 @@ conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
 Strict high-dimensional WardPF-move DA plus wider BC-window rerun:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
+conda run -n BRPC python -m calib.experiment_highdim_projected \
   --out_dir figs/highdim_physical_projected_diag_strongjump_strictda_l1_t035_bc4_seed5 \
   --data_mode physical_projected \
   --scenarios sudden mixed \
@@ -1335,7 +1335,7 @@ conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
 BRPC-F no-controller high-dimensional run:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
+conda run -n BRPC python -m calib.experiment_highdim_projected \
   --out_dir figs/highdim_physical_projected_diag_strongjump_brpcf_l1_bc4_bs32_seed5 \
   --data_mode physical_projected \
   --scenarios slope sudden mixed \
@@ -1358,7 +1358,7 @@ conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag \
 A joint Ensemble Kalman Filter baseline is available for representative 1D synthetic scenarios:
 
 ```bash
-conda run -n jumpGP python tools/run_1d_joint_enkf_synthetic.py \
+conda run -n BRPC python tools/run_1d_joint_enkf_synthetic.py \
   --out_dir figs/joint_enkf_1d_synthetic_seed5 \
   --scenarios all \
   --seed_count 5 \
@@ -1400,7 +1400,7 @@ Expected outputs:
 Sensitivity and selected-parameter run added for the reviewer-facing EnKF baseline:
 
 ```bash
-conda run -n jumpGP python tools/run_1d_joint_enkf_sensitivity.py \
+conda run -n BRPC python tools/run_1d_joint_enkf_sensitivity.py \
   --out_dir figs/joint_enkf_1d_sensitivity_seed3_grid \
   --scenarios all \
   --seed_count 3 \
@@ -1440,7 +1440,7 @@ Top global sensitivity rows from `figs/joint_enkf_1d_sensitivity_seed3_grid`:
 Formal 1D synthetic 5-seed EnKF run:
 
 ```bash
-conda run -n jumpGP python tools/run_1d_joint_enkf_synthetic.py \
+conda run -n BRPC python tools/run_1d_joint_enkf_synthetic.py \
   --out_dir figs/joint_enkf_1d_synthetic_best_global_seed5 \
   --scenarios all \
   --seed_count 5 \
@@ -1483,7 +1483,7 @@ The earlier one-column diagnostic used `C_t^{-1}` and should be interpreted as `
 Diagnostic command:
 
 ```bash
-conda run -n jumpGP python tools/compute_transport_gamma_diagnostic.py \
+conda run -n BRPC python tools/compute_transport_gamma_diagnostic.py \
   --out_dir figs/transport_gamma_true_prior_post_synth_plant012_seed5_dedup \
   --synthetic_raw_dir figs/synthetic_representative_sensitivity_seed5_np1024_20260426_234803/raw_runs \
   --include_plant \
@@ -1531,7 +1531,7 @@ where `theta_s` and `x` are in the standardized PlantSim space. The simulator ch
 Runner:
 
 ```bash
-conda run -n jumpGP python tools/run_plantsim_joint_enkf.py \
+conda run -n BRPC python tools/run_plantsim_joint_enkf.py \
   --out_dir figs/plantsim_joint_enkf_best_global_seed5 \
   --modes 0 1 2 \
   --seed_count 5 \
@@ -1578,7 +1578,7 @@ Notes on the proxy path in this diagnostic:
 Targeted fixed-support controller tuning helper:
 
 ```bash
-conda run -n jumpGP python tools/run_highdim_fixedsupport_tuning.py \
+conda run -n BRPC python tools/run_highdim_fixedsupport_tuning.py \
   --out_dir figs/highdim_fixedsupport_tuning \
   --scenarios all \
   --seed 13 \
@@ -1618,7 +1618,7 @@ wCUSUM tuning grid:
 Selected multi-seed appendix helper for the moderate high-dimensional diagnostic:
 
 ```bash
-conda run -n jumpGP python tools/run_highdim_selected_appendix.py \
+conda run -n BRPC python tools/run_highdim_selected_appendix.py \
   --out_dir figs/highdim_selected_appendix \
   --scenarios all \
   --seed_count 5 \
@@ -1673,7 +1673,7 @@ High-dimensional runner theta-tracking rule:
 Standard-BOCPD variant of the selected high-dimensional appendix helper:
 
 ```bash
-conda run -n jumpGP python tools/run_highdim_selected_appendix.py \
+conda run -n BRPC python tools/run_highdim_selected_appendix.py \
   --out_dir figs/highdim_selected_appendix_standard \
   --scenarios all \
   --seed_count 5 \
@@ -1712,7 +1712,7 @@ Important correction on the high-dimensional `DA` baseline:
 Strict high-dimensional `DA` correction workflow:
 
 ```bash
-conda run -n jumpGP python tools/rebuild_highdim_selected_appendix_strict_da.py \
+conda run -n BRPC python tools/rebuild_highdim_selected_appendix_strict_da.py \
   --source_dir figs/highdim_selected_appendix_standard_seed5_np1024_bs128_ns128_20260427_101723 \
   --out_dir figs/highdim_selected_appendix_standard_strictDA_seed5_np1024_bs128_ns128
 ```
@@ -1742,7 +1742,7 @@ Interpretation of the strict high-dimensional `DA`:
 One-seed fixed-support support/cooldown sweep helper:
 
 ```bash
-conda run -n jumpGP python tools/run_highdim_fixedsupport_support_sweep.py \
+conda run -n BRPC python tools/run_highdim_fixedsupport_support_sweep.py \
   --out_dir figs/highdim_fixedsupport_support_sweep \
   --scenarios all \
   --seed 13 \
@@ -1785,7 +1785,7 @@ DA default rule for synthetic experiments:
 Representative one-dimensional sensitivity helper:
 
 ```bash
-conda run -n jumpGP python tools/run_synthetic_representative_sensitivity.py \
+conda run -n BRPC python tools/run_synthetic_representative_sensitivity.py \
   --out_dir figs/synthetic_representative_sensitivity \
   --seed_count 5 \
   --seed_offset 0 \
@@ -1834,7 +1834,7 @@ Expected outputs:
 Event-quality postprocess for this representative sensitivity run:
 
 ```bash
-conda run -n jumpGP python tools/postprocess_synthetic_representative_sensitivity_cp.py \
+conda run -n BRPC python tools/postprocess_synthetic_representative_sensitivity_cp.py \
   --results_dir figs/synthetic_representative_sensitivity_seed5_np1024_20260426_234803 \
   --tolerance 2
 ```

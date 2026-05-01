@@ -22,22 +22,22 @@ from calib.run_synthetic_highdim_projected_diag import (
 def bocpd_configs() -> List[Dict[str, object]]:
     return [
         dict(
-            method_name="FixedSupport_BOCPD",
+            method_name="B-BRPC-F",
             run_name="B-BRPC-F_h200_m1_c10",
             controller_overrides=dict(hazard_lambda=200.0, restart_margin=1.0, restart_cooldown=10),
         ),
         dict(
-            method_name="FixedSupport_BOCPD",
+            method_name="B-BRPC-F",
             run_name="B-BRPC-F_h400_m2_c20",
             controller_overrides=dict(hazard_lambda=400.0, restart_margin=2.0, restart_cooldown=20),
         ),
         dict(
-            method_name="FixedSupport_BOCPD",
+            method_name="B-BRPC-F",
             run_name="B-BRPC-F_h800_m4_c20",
             controller_overrides=dict(hazard_lambda=800.0, restart_margin=4.0, restart_cooldown=20),
         ),
         dict(
-            method_name="FixedSupport_BOCPD",
+            method_name="B-BRPC-F",
             run_name="B-BRPC-F_h1600_m4_c30",
             controller_overrides=dict(hazard_lambda=1600.0, restart_margin=4.0, restart_cooldown=30),
         ),
@@ -47,22 +47,22 @@ def bocpd_configs() -> List[Dict[str, object]]:
 def wcusum_configs() -> List[Dict[str, object]]:
     return [
         dict(
-            method_name="Exact_wCUSUM",  # placeholder method; overwritten below
+            method_name="C-BRPC-E",  # placeholder method; overwritten below
             run_name="B-BRPC-F_w4_t025_k025_sf025",
             controller_overrides=dict(wcusum_window=4, wcusum_threshold=0.25, wcusum_kappa=0.25, wcusum_sigma_floor=0.25),
         ),
         dict(
-            method_name="Exact_wCUSUM",
+            method_name="C-BRPC-E",
             run_name="B-BRPC-F_w4_t050_k025_sf025",
             controller_overrides=dict(wcusum_window=4, wcusum_threshold=0.50, wcusum_kappa=0.25, wcusum_sigma_floor=0.25),
         ),
         dict(
-            method_name="Exact_wCUSUM",
+            method_name="C-BRPC-E",
             run_name="B-BRPC-F_w8_t050_k050_sf050",
             controller_overrides=dict(wcusum_window=8, wcusum_threshold=0.50, wcusum_kappa=0.50, wcusum_sigma_floor=0.50),
         ),
         dict(
-            method_name="Exact_wCUSUM",
+            method_name="C-BRPC-E",
             run_name="B-BRPC-F_w8_t100_k050_sf050",
             controller_overrides=dict(wcusum_window=8, wcusum_threshold=1.00, wcusum_kappa=0.50, wcusum_sigma_floor=0.50),
         ),
@@ -90,7 +90,7 @@ def main() -> None:
 
     rows = []
     configs = bocpd_configs() + [
-        dict(method_name="FixedSupport_wCUSUM", run_name=cfg["run_name"], controller_overrides=cfg["controller_overrides"])
+        dict(method_name="C-BRPC-F", run_name=cfg["run_name"], controller_overrides=cfg["controller_overrides"])
         for cfg in wcusum_configs()
     ]
 

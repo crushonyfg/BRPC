@@ -9,9 +9,9 @@ import pandas as pd
 import torch
 
 METHOD_LABELS = {
-    "HalfRefit_BOCPD": "B-BRPC-RRA",
-    "Exact_BOCPD": "B-BRPC-E",
-    "Exact_wCUSUM": "C-BRPC-E",
+    "B-BRPC-RRA": "B-BRPC-RRA",
+    "B-BRPC-E": "B-BRPC-E",
+    "C-BRPC-E": "C-BRPC-E",
     "DA": "DA",
     "BC": "BC",
 }

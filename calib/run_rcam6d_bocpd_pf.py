@@ -840,25 +840,25 @@ if __name__ == "__main__":
 
 '''
 # 运行单个方法（快速测试，200步）
-python -m calib.run_rcam6d_bocpd_pf --plot_dir "figs/rcam6d" --num_particles 128 --max_steps 200 --normalize --method R-BOCPD-PF-nodiscrepancy
+python -m calib.experiment_rcam6d --plot_dir "figs/rcam6d" --num_particles 128 --max_steps 200 --normalize --method R-BOCPD-PF-nodiscrepancy
 
 # 运行所有三种方法并比较（快速测试，200步）
-python -m calib.run_rcam6d_bocpd_pf --plot_dir "figs/rcam6d_compare" --num_particles 128 --max_steps 200 --normalize --run_all
+python -m calib.experiment_rcam6d --plot_dir "figs/rcam6d_compare" --num_particles 128 --max_steps 200 --normalize --run_all
 
 # 完整运行所有方法
-python -m calib.run_rcam6d_bocpd_pf --plot_dir "figs/rcam6d_compare" --num_particles 256 --normalize --run_all
+python -m calib.experiment_rcam6d --plot_dir "figs/rcam6d_compare" --num_particles 256 --normalize --run_all
 
 # 可选方法:
 #   R-BOCPD-PF-usediscrepancy   - PF + BOCPD 都使用 discrepancy
 #   R-BOCPD-PF-nodiscrepancy    - 都不使用 discrepancy
 #   R-BOCPD-PF-halfdiscrepancy  - PF 不用，BOCPD 用 discrepancy
 
-python -m calib.run_rcam6d_bocpd_pf --plot_dir "figs/rcam6d_compare" --num_particles 1024 --max_steps 1000 --normalize --run_all
+python -m calib.experiment_rcam6d --plot_dir "figs/rcam6d_compare" --num_particles 1024 --max_steps 1000 --normalize --run_all
 
 
 # 运行所有三种方法并比较（快速测试）
-conda run -n jumpGP python -m calib.run_rcam6d_bocpd_pf --plot_dir "figs/rcam6d_compare" --num_particles 1024 --max_steps 100 --normalize --run_all
+conda run -n BRPC python -m calib.experiment_rcam6d --plot_dir "figs/rcam6d_compare" --num_particles 1024 --max_steps 100 --normalize --run_all
 
 # 运行单个方法
-conda run -n jumpGP python -m calib.run_rcam6d_bocpd_pf --plot_dir "figs/rcam6d" --num_particles 128 --max_steps 200 --normalize --method R-BOCPD-PF-nodiscrepancy
+conda run -n BRPC python -m calib.experiment_rcam6d --plot_dir "figs/rcam6d" --num_particles 128 --max_steps 200 --normalize --method R-BOCPD-PF-nodiscrepancy
 '''

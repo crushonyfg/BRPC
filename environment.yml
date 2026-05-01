@@ -1,4 +1,4 @@
-name: jumpGP
+name: BRPC
 channels:
   - pytorch
   - conda-forge

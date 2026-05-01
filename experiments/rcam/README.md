@@ -3,9 +3,9 @@
 Primary runners:
 
 ```bash
-conda run -n jumpGP python -m calib.run_rcam_bocpd_pf --help
-conda run -n jumpGP python -m calib.run_rcam6d_bocpd_pf --help
-conda run -n jumpGP python -m calib.run_rcam6d_hybrid_rolled --help
+conda run -n BRPC python -m calib.experiment_rcam --help
+conda run -n BRPC python -m calib.experiment_rcam6d --help
+conda run -n BRPC python -m calib.experiment_rcam6d_hybrid --help
 ```
 
 Prefer explicit `--data_csv`, `--out_csv`, and `--plot_dir` arguments because

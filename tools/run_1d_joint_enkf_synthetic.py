@@ -169,10 +169,10 @@ def run_one(
 
     raw_dir = out_dir / "raw_runs"
     raw_dir.mkdir(parents=True, exist_ok=True)
-    tag = f"{scenario}_seed{seed}_bs{batch_size}_JointEnKF"
+    tag = f"{scenario}_seed{seed}_bs{batch_size}_EnKF"
     raw_path = raw_dir / f"{tag}.pt"
     payload = dict(
-        method="JointEnKF",
+        method="EnKF",
         scenario=scenario,
         seed=int(seed),
         batch_size=int(batch_size),
@@ -199,7 +199,7 @@ def run_one(
     plot_dir.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(10.5, 4.5))
     plt.plot(oracle_arr, "k--", lw=2.0, label="oracle theta*")
-    plt.plot(theta_arr, color="tab:blue", lw=1.8, label="JointEnKF")
+    plt.plot(theta_arr, color="tab:blue", lw=1.8, label="EnKF")
     cp_times = list(payload.get("cp_times", []))
     for cp in cp_times:
         plt.axvline(int(cp) // int(batch_size), color="tab:red", ls="--", alpha=0.35)
@@ -222,7 +222,7 @@ def run_one(
 
     return dict(
         scenario=scenario,
-        method="JointEnKF",
+        method="EnKF",
         seed=int(seed),
         batch_size=int(batch_size),
         n_ensemble=int(n_ensemble),
@@ -293,7 +293,7 @@ def main() -> None:
             with (summary_dir / "manifest.json").open("w", encoding="utf-8") as fh:
                 json.dump(
                     {
-                        "method": "JointEnKF",
+                        "method": "EnKF",
                         "notes": "Joint EnKF baseline over [theta, discrepancy-basis coefficients] for representative 1D synthetic scenarios.",
                         "scenarios": scenarios,
                         "seeds": sorted(run_df["seed"].unique().tolist()),

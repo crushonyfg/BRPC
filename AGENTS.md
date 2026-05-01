@@ -7,12 +7,12 @@ It is meant to keep code changes easy to review, easy to ablate, and easy to rol
 
 ## Environment
 
-- Use the `jumpGP` conda environment for runtime smoke tests.
+- Use the `BRPC` conda environment for runtime smoke tests.
 - Do not treat the default shell Python as the validation environment for model code.
 - Preferred runtime check pattern:
-  - `conda run -n jumpGP python -m py_compile ...` for syntax checks.
-  - `conda run -n jumpGP python -c "..."` for small targeted smoke tests.
-- When a change affects a runner or a new method path, run at least one minimal smoke test in `jumpGP` before closing the task.
+  - `conda run -n BRPC python -m py_compile ...` for syntax checks.
+  - `conda run -n BRPC python -c "..."` for small targeted smoke tests.
+- When a change affects a runner or a new method path, run at least one minimal smoke test in `BRPC` before closing the task.
 
 ## Change style
 
@@ -35,7 +35,7 @@ It is meant to keep code changes easy to review, easy to ablate, and easy to rol
 ## Validation expectations
 
 - For pure code-structure changes, run `py_compile` on all touched Python files.
-- For modeling-path changes, also run one small runtime smoke test in `jumpGP`.
+- For modeling-path changes, also run one small runtime smoke test in `BRPC`.
 - If a change adds a new discrepancy mode or restart mode, test at least one representative synthetic path that actually enters the modified branch.
 - When a runtime bug is fixed, prefer reproducing it with a minimal command and then rerunning the same command after the patch.
 
@@ -67,7 +67,7 @@ It is meant to keep code changes easy to review, easy to ablate, and easy to rol
 3. Keep backward compatibility in shared interfaces where possible.
 4. Update `rolled_cusum_modeling_workdoc.md` with the new option and formula.
 5. Run `py_compile`.
-6. Run a minimal `jumpGP` smoke test.
+6. Run a minimal `BRPC` smoke test.
 7. Only then report the change as complete.
 
 ## Optional future maintenance
@@ -83,7 +83,7 @@ It is meant to keep code changes easy to review, easy to ablate, and easy to rol
 
 - Whenever a new `run_*` script, runner profile, or experiment entrypoint is added, document its command-line usage in `rolled_cusum_modeling_workdoc.md`.
 - At minimum, document:
-  - the exact `conda run -n jumpGP python -m ...` command,
+  - the exact `conda run -n BRPC python -m ...` command,
   - required and optional CLI flags,
   - supported `--profile` values if any,
   - which outputs are expected to be written.

@@ -22,14 +22,14 @@ from calib.run_synthetic_suddenCmp_tryThm import run_one_sudden
 
 
 LABELS = {
-    "HalfRefit": "B-BRPC-RRA",
-    "Exact_BOCPD": "B-BRPC-E",
-    "Exact_wCUSUM": "C-BRPC-E",
+    "B-BRPC-RRA": "B-BRPC-RRA",
+    "B-BRPC-E": "B-BRPC-E",
+    "C-BRPC-E": "C-BRPC-E",
     "DA": "DA",
     "BC": "BC",
 }
 
-PLOT_ORDER = ["HalfRefit", "Exact_BOCPD", "Exact_wCUSUM", "DA", "BC"]
+PLOT_ORDER = ["B-BRPC-RRA", "B-BRPC-E", "C-BRPC-E", "DA", "BC"]
 
 
 def _build_methods(num_particles: int, delta_bpc_lambda: float) -> Dict[str, Dict]:
@@ -44,18 +44,18 @@ def _build_methods(num_particles: int, delta_bpc_lambda: float) -> Dict[str, Dic
         num_particles=int(num_particles),
     )
     return {
-        "HalfRefit": dict(
+        "B-BRPC-RRA": dict(
             type="bocpd",
             mode="restart",
             use_discrepancy=False,
             bocpd_use_discrepancy=True,
             num_particles=int(num_particles),
         ),
-        "Exact_BOCPD": dict(
+        "B-BRPC-E": dict(
             **exact_base,
             mode="restart",
         ),
-        "Exact_wCUSUM": dict(
+        "C-BRPC-E": dict(
             **exact_base,
             mode="wcusum",
             controller_name="wcusum",

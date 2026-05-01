@@ -9,16 +9,16 @@ import torch
 
 
 LABELS = {
-    "Exact_BOCPD": "B-BRPC-E",
-    "Exact_wCUSUM": "C-BRPC-E",
+    "B-BRPC-E": "B-BRPC-E",
+    "C-BRPC-E": "C-BRPC-E",
     "HalfRefit": "B-BRPC-RRA",
-    "WardPFMove_BOCPD": "BOCPD-WardPFMove",
+    "B-WaldPF": "BOCPD-WardPFMove",
     "DA": "DA",
     "BC": "BC",
-    "Proxy_BOCPD": "Proxy-BOCPD",
-    "Proxy_wCUSUM": "Proxy-wCUSUM",
-    "FixedSupport_BOCPD": "FixedSupport-BOCPD",
-    "FixedSupport_wCUSUM": "FixedSupport-wCUSUM",
+    "B-BRPC-P": "Proxy-BOCPD",
+    "C-BRPC-P": "Proxy-wCUSUM",
+    "B-BRPC-F": "FixedSupport-BOCPD",
+    "C-BRPC-F": "FixedSupport-wCUSUM",
 }
 
 

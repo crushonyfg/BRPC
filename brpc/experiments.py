@@ -21,37 +21,37 @@ class ExperimentEntry:
     @property
     def command(self) -> str:
         args = " ".join(self.example_args)
-        return f"conda run -n jumpGP python -m {self.module} {args}".strip()
+        return f"conda run -n BRPC python -m {self.module} {args}".strip()
 
 
 EXPERIMENTS: Dict[str, ExperimentEntry] = {
     "synthetic_sudden": ExperimentEntry(
-        module="calib.run_synthetic_suddenCmp_tryThm",
+        module="calib.experiment_synthetic_sudden",
         purpose="Synthetic abrupt changepoint comparison for BRPC variants.",
         example_args=("--profile", "main", "--out_dir", "figs/sudden_main"),
     ),
     "synthetic_slope": ExperimentEntry(
-        module="calib.run_synthetic_slope_deltaCmp",
+        module="calib.experiment_synthetic_slope",
         purpose="Synthetic smooth/slope drift comparison for discrepancy variants.",
         example_args=("--profile", "main", "--out_dir", "figs/slope_main"),
     ),
     "synthetic_mixed": ExperimentEntry(
-        module="calib.run_synthetic_mixed_thetaCmp",
+        module="calib.experiment_synthetic_mixed",
         purpose="Mixed theta trajectory benchmark and ablation runner.",
         example_args=("--profile", "main", "--out_dir", "figs/mixed_main"),
     ),
     "synthetic_cpd_suite": ExperimentEntry(
-        module="calib.run_synthetic_cpd_suite",
+        module="calib.experiment_synthetic_cpd_suite",
         purpose="Configurable CPD suite over saved raw payloads and method sets.",
         example_args=("--help",),
     ),
     "plantsim": ExperimentEntry(
-        module="calib.run_plantSim_v3_std",
+        module="calib.experiment_plantsim",
         purpose="PlantSim / factory data experiment runner.",
         example_args=("--help",),
     ),
     "highdim_projected": ExperimentEntry(
-        module="calib.run_synthetic_highdim_projected_diag",
+        module="calib.experiment_highdim_projected",
         purpose="High-dimensional projected diagnostic experiment.",
         example_args=("--help",),
     ),

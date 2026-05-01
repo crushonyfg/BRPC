@@ -21,25 +21,25 @@ from calib.run_synthetic_highdim_projected_diag import (  # noqa: E402
 def selected_runs(standard_bocpd: bool = False) -> List[Dict[str, object]]:
     if standard_bocpd:
         brpcf_run = dict(
-            method_name="FixedSupport_BOCPD",
+            method_name="B-BRPC-F",
             run_name="B-BRPC-F_standard_h400",
             controller_overrides=dict(controller_mode="standard", hazard_lambda=400.0),
         )
     else:
         brpcf_run = dict(
-            method_name="FixedSupport_BOCPD",
+            method_name="B-BRPC-F",
             run_name="B-BRPC-F_h400_m2_c640",
             controller_overrides=dict(hazard_lambda=400.0, restart_margin=2.0, restart_cooldown=640),
         )
     return [
         brpcf_run,
         dict(
-            method_name="FixedSupport_wCUSUM",
+            method_name="C-BRPC-F",
             run_name="C-BRPC-F_w4_t025_k025_sf025",
             controller_overrides=dict(wcusum_window=4, wcusum_threshold=0.25, wcusum_kappa=0.25, wcusum_sigma_floor=0.25),
         ),
         dict(
-            method_name="SlidingWindow-KOH",
+            method_name="BC",
             run_name="BC",
             controller_overrides={},
         ),
