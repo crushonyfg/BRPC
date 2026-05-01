@@ -1,6 +1,7 @@
-# Jump Gaussian Process / BRPC
+# BRPC
 
-Code for the Jump Gaussian Process paper experiments. The repository contains
+Code for the ``Online Bayesian Calibration under Gradual and
+Abrupt System Changes`` paper experiments. The repository contains
 online Bayesian calibration, particle filtering, BOCPD restart logic, rolled
 CUSUM controllers, and the synthetic / PlantSim / RCAM experiments used during
 paper development.
