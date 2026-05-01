@@ -1,0 +1,19 @@
+name: jumpGP
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.10
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - joblib
+  - tqdm
+  - pytorch
+  - pip
+  - pip:
+      - gpytorch
+      - -e .

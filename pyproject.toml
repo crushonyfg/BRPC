@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jump-brpc"
+version = "0.1.0"
+description = "Jump Gaussian Process / Bayesian Recursive Particle Calibration experiments"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "DynamicCalibration contributors" }]
+dependencies = [
+    "gpytorch",
+    "joblib",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "torch",
+    "tqdm",
+]
+
+[tool.setuptools]
+packages = ["calib", "brpc"]

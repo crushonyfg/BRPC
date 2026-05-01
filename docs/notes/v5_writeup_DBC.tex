@@ -1,0 +1,1265 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2026
+
+\usepackage[preprint]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{bbm}
+\usepackage{svg}
+
+\title{Online Bayesian Calibration under Drift and Regime Change}
+
+\author{
+  Anonymous Authors \\
+  Affiliation \\
+  Address \\
+  \texttt{email@example.com} \\
+}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{remark}{Remark}
+\newtheorem{assumption}{Assumption}
+
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator{\KL}{KL}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Cov}{Cov}
+
+\begin{document}
+
+\subsection{An Online Optimization View of Bayesian Projected Calibration}
+\label{sec:online_bpc}
+
+We now present a theory-first interpretation of our online calibration problem as a regime-aware extension of Bayesian projected calibration. Our goal in this section is not yet to describe the final engineering design used in the main experiments, but rather to formulate a clean online optimization problem, derive its sequential updates, and clarify how the resulting update differs from the half-discrepancy construction introduced later.
+
+% \paragraph{Static two-stage projected calibration.}
+% In static projected calibration, one first identifies a target calibration parameter by projecting the true system onto the simulator family, and then models the remaining mismatch conditional on that projected parameter. Abstractly, let $\zeta(\cdot)$ denote the latent physical response surface. A projected target parameter may be written as
+% \begin{equation}
+% \theta^\dagger
+% =
+% \arg\min_{\theta \in \Theta}
+% \;
+% \mathcal L_{\mathrm{proj}}(\theta),
+% \qquad
+% \mathcal L_{\mathrm{proj}}(\theta)
+% :=
+% \int
+% \big(
+% \zeta(x)-y_s(x,\theta)
+% \big)^2
+% \,dF_X(x),
+% \label{eq:static_projected_target}
+% \end{equation}
+% where $F_X$ is the design distribution. 
+
+% % Once $\theta^\dagger$ is determined, the associated discrepancy may be equivalently characterized as the solution of
+% % \begin{equation}
+% % \delta^\dagger
+% % =
+% % \arg\min_{\delta}
+% % \int
+% % \big(
+% % \zeta(x)-y_s(x,\theta^\dagger)-\delta(x)
+% % \big)^2
+% % \,dF_X(x).
+% % \label{eq:static_projected_delta_opt}
+% % \end{equation}
+% % The minimizer is pointwise given by
+% % \begin{equation}
+% % \delta^\dagger(x)=\zeta(x)-y_s(x,\theta^\dagger).
+% % \label{eq:static_projected_delta}
+% % \end{equation}
+% % Once $\theta^\dagger$ is determined, discrepancy may be inferred as the MAP solution under a Gaussian-process prior. Specifically, under
+% % \begin{equation}
+% % y_i = y_s(x_i,\theta^\dagger) + \delta(x_i) + \varepsilon_i,
+% % \qquad
+% % \varepsilon_i \stackrel{iid}{\sim} \mathcal N(0,\sigma^2),
+% % \qquad
+% % \delta \sim \mathcal{GP}(0,k_\phi),
+% % \label{eq:static_projected_gp_model_map}
+% % \end{equation}
+% % the discrepancy MAP estimator is equivalently given by
+% % \begin{equation}
+% % \delta^\dagger
+% % =
+% % \arg\min_{\delta \in \mathcal H_{k_\phi}}
+% % \left\{
+% % \frac{1}{\sigma^2}
+% % \sum_{i=1}^n
+% % \big(
+% % y_i-y_s(x_i,\theta^\dagger)-\delta(x_i)
+% % \big)^2
+% % +
+% % \|\delta\|_{\mathcal H_{k_\phi}}^2
+% % \right\},
+% % \label{eq:static_projected_delta_gp_map}
+% % \end{equation}
+% % where $\mathcal H_{k_\phi}$ denotes the reproducing-kernel Hilbert space associated with $k_\phi$.
+% Once $\theta^\dagger$ is determined, discrepancy is then inferred conditionally under a Gaussian-process prior. Specifically, under
+% \begin{equation}
+% y_i = y_s(x_i,\theta^\dagger) + \delta(x_i) + \varepsilon_i,
+% \qquad
+% \varepsilon_i \stackrel{iid}{\sim} \mathcal N(0,\sigma^2),
+% \qquad
+% \delta \sim \mathcal{GP}(0,k_\phi),
+% \label{eq:static_projected_gp_model}
+% \end{equation}
+% the second-stage discrepancy posterior may be characterized variationally as
+% \begin{equation}
+% q^\delta(\delta \mid \theta^\dagger)
+% =
+% \arg\min_q
+% \left\{
+% -
+% \mathbb E_q\!\left[
+% \log p(Y \mid X,\theta^\dagger,\delta)
+% \right]
+% +
+% \mathrm{KL}\!\left(
+% q(\delta)\,\|\,p_{\mathrm{GP}}(\delta)
+% \right)
+% \right\},
+% \label{eq:static_projected_delta_variational}
+% \end{equation}
+% where
+% \begin{equation}
+% Y \mid X,\theta^\dagger,\delta
+% \sim
+% \mathcal N\!\big(
+% Y_s(\theta^\dagger)+\delta(X),\,
+% \sigma^2 I
+% \big).
+% \label{eq:static_projected_delta_likelihood}
+% \end{equation}
+% The minimizer of \eqref{eq:static_projected_delta_variational} is the exact Gaussian-process posterior
+% \begin{equation}
+% q^\delta(\delta \mid \theta^\dagger)
+% \propto
+% p(Y \mid X,\theta^\dagger,\delta)\,p_{\mathrm{GP}}(\delta).
+% \label{eq:static_projected_delta_posterior}
+% \end{equation}
+
+% \begin{proposition}[Static second-stage posterior and GP-MAP equivalence]
+% \label{prop:static_delta_posterior_map_equiv}
+% Consider the static second-stage discrepancy model
+% \begin{equation}
+% y_i = y_s(x_i,\theta^\dagger) + \delta(x_i) + \varepsilon_i,
+% \qquad
+% \varepsilon_i \stackrel{iid}{\sim} \mathcal N(0,\sigma^2),
+% \qquad
+% \delta \sim \mathcal{GP}(0,k_\phi),
+% \label{eq:static_delta_gp_model_prop}
+% \end{equation}
+% and let
+% \begin{equation}
+% q^\delta(\delta \mid \theta^\dagger)
+% =
+% \arg\min_q
+% \left\{
+% -
+% \mathbb E_q\!\left[
+% \log p(Y \mid X,\theta^\dagger,\delta)
+% \right]
+% +
+% \mathrm{KL}\!\left(
+% q(\delta)\,\|\,p_{\mathrm{GP}}(\delta)
+% \right)
+% \right\}
+% \label{eq:static_delta_variational_prop}
+% \end{equation}
+% denote the variational characterization of the discrepancy posterior. Then:
+% \begin{enumerate}[leftmargin=1.5em]
+%     \item the minimizer of \eqref{eq:static_delta_variational_prop} is the exact Gaussian-process posterior
+%     \begin{equation}
+%     q^\delta(\delta \mid \theta^\dagger)
+%     \propto
+%     p(Y \mid X,\theta^\dagger,\delta)\,p_{\mathrm{GP}}(\delta);
+%     \label{eq:static_delta_exact_posterior_prop}
+%     \end{equation}
+%     \item the posterior mode
+%     \begin{equation}
+%     \delta^\dagger_{\mathrm{MAP}}
+%     :=
+%     \arg\max_\delta q^\delta(\delta \mid \theta^\dagger)
+%     \label{eq:static_delta_map_def}
+%     \end{equation}
+%     is equivalently given by the GP-MAP optimization
+%     \begin{equation}
+%     \delta^\dagger_{\mathrm{MAP}}
+%     =
+%     \arg\min_{\delta \in \mathcal H_{k_\phi}}
+%     \left\{
+%     \frac{1}{\sigma^2}
+%     \sum_{i=1}^n
+%     \big(
+%     y_i-y_s(x_i,\theta^\dagger)-\delta(x_i)
+%     \big)^2
+%     +
+%     \|\delta\|_{\mathcal H_{k_\phi}}^2
+%     \right\},
+%     \label{eq:static_delta_map_rkhs_prop}
+%     \end{equation}
+%     where $\mathcal H_{k_\phi}$ is the RKHS associated with $k_\phi$.
+% \end{enumerate}
+% \end{proposition}
+
+% \begin{proof}
+% The first claim follows from the standard variational identity for Bayesian updating: minimizing
+% \[
+% -
+% \mathbb E_q[\log p(Y \mid X,\theta^\dagger,\delta)]
+% +
+% \mathrm{KL}(q(\delta)\,\|\,p_{\mathrm{GP}}(\delta))
+% \]
+% over probability measures $q$ is equivalent, up to an additive constant, to minimizing
+% \[
+% \mathrm{KL}\!\left(
+% q(\delta)\,\|\,q^\delta(\delta \mid \theta^\dagger)
+% \right),
+% \]
+% whose unique minimizer is the exact posterior \eqref{eq:static_delta_exact_posterior_prop}.
+
+% For the second claim, the posterior mode maximizes
+% \[
+% \log p(Y \mid X,\theta^\dagger,\delta) + \log p_{\mathrm{GP}}(\delta).
+% \]
+% Under the Gaussian likelihood in \eqref{eq:static_delta_gp_model_prop},
+% \[
+% -\log p(Y \mid X,\theta^\dagger,\delta)
+% =
+% \frac{1}{2\sigma^2}
+% \sum_{i=1}^n
+% \big(
+% y_i-y_s(x_i,\theta^\dagger)-\delta(x_i)
+% \big)^2
+% +\mathrm{const}.
+% \]
+% For a Gaussian-process prior, the Cameron--Martin / RKHS characterization of the log prior implies that, up to an additive constant,
+% \[
+% -\log p_{\mathrm{GP}}(\delta)
+% =
+% \frac{1}{2}\|\delta\|_{\mathcal H_{k_\phi}}^2.
+% \]
+% Hence maximizing the posterior density is equivalent to minimizing
+% \[
+% \frac{1}{2\sigma^2}
+% \sum_{i=1}^n
+% \big(
+% y_i-y_s(x_i,\theta^\dagger)-\delta(x_i)
+% \big)^2
+% +
+% \frac{1}{2}\|\delta\|_{\mathcal H_{k_\phi}}^2,
+% \]
+% which is equivalent to \eqref{eq:static_delta_map_rkhs_prop} after rescaling by $2$.
+% \end{proof}
+
+% \begin{remark}[Why we use the posterior form in the online extension]
+% \label{rem:posterior_vs_map_static_online}
+% Proposition~\ref{prop:static_delta_posterior_map_equiv} shows that, in the static second stage, the Bayesian posterior formulation and the GP-MAP optimization induce the same discrepancy estimator at the posterior mode. We use the posterior form as the primary statement because the online extension updates a full discrepancy posterior relative to the previous predictive prior, rather than updating only a single discrepancy function.
+% \end{remark}
+
+% In this sense, static projected calibration admits a natural two-stage interpretation:
+% \begin{enumerate}[leftmargin=1.5em]
+%     \item identify the projected parameter target $\theta^\dagger$, and
+%     \item infer the remaining discrepancy conditional on that target.
+% \end{enumerate}
+% The key structural idea is that parameter fitting and discrepancy fitting are not treated as a single unconstrained joint search problem; instead, discrepancy is interpreted as the residual mismatch \emph{after} projection onto the simulator family.
+
+\paragraph{Static two-stage projected calibration.}
+In static projected calibration, one first identifies a target calibration parameter by projecting the true system onto the simulator family, and then models the remaining mismatch conditional on that projected parameter. Let $\zeta(\cdot)$ denote the latent physical response surface. A projected target parameter may be written as
+\begin{equation}
+\theta^\dagger
+=
+\arg\min_{\theta \in \Theta}
+\;
+\mathcal L_{\mathrm{proj}}(\theta),
+\qquad
+\mathcal L_{\mathrm{proj}}(\theta)
+:=
+\int
+\big(
+\zeta(x)-y_s(x,\theta)
+\big)^2
+\,dF_X(x),
+\label{eq:static_projected_target}
+\end{equation}
+where $F_X$ is the design distribution.
+
+Once $\theta^\dagger$ is determined, discrepancy is inferred conditionally under a Gaussian-process prior. Specifically, given observations
+\begin{equation}
+y_i = y_s(x_i,\theta^\dagger) + \delta(x_i) + \varepsilon_i,
+\qquad
+\varepsilon_i \stackrel{iid}{\sim} \mathcal N(0,\sigma^2),
+\qquad
+\delta \sim \mathcal{GP}(0,k_\phi),
+\label{eq:static_projected_gp_model}
+\end{equation}
+the second-stage discrepancy posterior may be characterized variationally as
+\begin{equation}
+q^\delta(\delta \mid \theta^\dagger)
+=
+\arg\min_q
+\left\{
+-
+\mathbb E_q\!\left[
+\log p(Y \mid X,\theta^\dagger,\delta)
+\right]
++
+\mathrm{KL}\!\left(
+q(\delta)\,\|\,p_{\mathrm{GP}}(\delta)
+\right)
+\right\},
+\label{eq:static_projected_delta_variational}
+\end{equation}
+where
+\begin{equation}
+Y \mid X,\theta^\dagger,\delta
+\sim
+\mathcal N\!\big(
+Y_s(\theta^\dagger)+\delta(X),\,
+\sigma^2 I
+\big).
+\label{eq:static_projected_delta_likelihood}
+\end{equation}
+The minimizer of \eqref{eq:static_projected_delta_variational} is the exact Gaussian-process posterior
+\begin{equation}
+q^\delta(\delta \mid \theta^\dagger)
+\propto
+p(Y \mid X,\theta^\dagger,\delta)\,p_{\mathrm{GP}}(\delta).
+\label{eq:static_projected_delta_posterior}
+\end{equation}
+
+Thus, static projected calibration admits a natural two-stage interpretation:
+\begin{enumerate}[leftmargin=1.5em]
+    \item identify the projected parameter target $\theta^\dagger$, and
+    \item infer the remaining discrepancy conditional on that target.
+\end{enumerate}
+The key structural idea is that parameter fitting and discrepancy fitting are not treated as a single unconstrained joint search problem; instead, discrepancy is interpreted as the residual mismatch \emph{after} projection onto the simulator family.
+
+\begin{proposition}[Static second-stage posterior and GP-MAP equivalence]
+\label{prop:static_delta_posterior_map_equiv}
+Under the Gaussian-process discrepancy model \eqref{eq:static_projected_gp_model}, the variational characterization \eqref{eq:static_projected_delta_variational} and the GP-MAP optimization induce the same discrepancy estimator at the posterior mode. More precisely:
+\begin{enumerate}[leftmargin=1.5em]
+    \item the minimizer of \eqref{eq:static_projected_delta_variational} is the exact Gaussian-process posterior
+    \begin{equation}
+    q^\delta(\delta \mid \theta^\dagger)
+    \propto
+    p(Y \mid X,\theta^\dagger,\delta)\,p_{\mathrm{GP}}(\delta);
+    \label{eq:static_delta_exact_posterior_prop}
+    \end{equation}
+    \item the posterior mode
+    \begin{equation}
+    \delta^\dagger_{\mathrm{MAP}}
+    :=
+    \arg\max_\delta q^\delta(\delta \mid \theta^\dagger)
+    \label{eq:static_delta_map_def}
+    \end{equation}
+    is equivalently given by
+    \begin{equation}
+    \delta^\dagger_{\mathrm{MAP}}
+    =
+    \arg\min_{\delta \in \mathcal H_{k_\phi}}
+    \left\{
+    \frac{1}{\sigma^2}
+    \sum_{i=1}^n
+    \big(
+    y_i-y_s(x_i,\theta^\dagger)-\delta(x_i)
+    \big)^2
+    +
+    \|\delta\|_{\mathcal H_{k_\phi}}^2
+    \right\},
+    \label{eq:static_delta_map_rkhs_prop}
+    \end{equation}
+    where $\mathcal H_{k_\phi}$ is the RKHS associated with $k_\phi$.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+The first claim follows from the standard variational identity for Bayesian updating. Minimizing
+\[
+-
+\mathbb E_q[\log p(Y \mid X,\theta^\dagger,\delta)]
++
+\mathrm{KL}(q(\delta)\,\|\,p_{\mathrm{GP}}(\delta))
+\]
+over probability measures $q$ is equivalent, up to an additive constant, to minimizing
+\[
+\mathrm{KL}\!\left(
+q(\delta)\,\|\,q^\delta(\delta \mid \theta^\dagger)
+\right),
+\]
+whose unique minimizer is the exact posterior \eqref{eq:static_delta_exact_posterior_prop}.
+
+For the second claim, the posterior mode maximizes
+\[
+\log p(Y \mid X,\theta^\dagger,\delta) + \log p_{\mathrm{GP}}(\delta).
+\]
+Under the Gaussian likelihood \eqref{eq:static_projected_delta_likelihood},
+\[
+-\log p(Y \mid X,\theta^\dagger,\delta)
+=
+\frac{1}{2\sigma^2}
+\sum_{i=1}^n
+\big(
+y_i-y_s(x_i,\theta^\dagger)-\delta(x_i)
+\big)^2
++\mathrm{const}.
+\]
+Moreover, the Gaussian-process prior induces, up to an additive constant, the quadratic RKHS penalty
+\[
+-\log p_{\mathrm{GP}}(\delta)
+=
+\frac{1}{2}\|\delta\|_{\mathcal H_{k_\phi}}^2.
+\]
+Therefore maximizing the posterior is equivalent to minimizing
+\[
+\frac{1}{2\sigma^2}
+\sum_{i=1}^n
+\big(
+y_i-y_s(x_i,\theta^\dagger)-\delta(x_i)
+\big)^2
++
+\frac{1}{2}\|\delta\|_{\mathcal H_{k_\phi}}^2,
+\]
+which is equivalent to \eqref{eq:static_delta_map_rkhs_prop} after rescaling by $2$.
+\end{proof}
+
+\begin{remark}[Why we use the posterior form in the online extension]
+\label{rem:posterior_vs_map_static_online}
+Proposition~\ref{prop:static_delta_posterior_map_equiv} shows that, in the static second stage, the Bayesian posterior formulation and the GP-MAP optimization lead to the same discrepancy estimator at the posterior mode. We nonetheless take the posterior form as primary, because the online extension developed below updates a full discrepancy posterior relative to a previous predictive prior, rather than updating only a single discrepancy function.
+\end{remark}
+
+\paragraph{From static projection to online local projection.}
+The online setting considered in this paper is harder for two reasons. First, the calibration target is time-varying, so the relevant projected parameter is no longer a single static quantity but a sequence $\theta_t^\star$. Second, data arrive sequentially, so repeatedly re-solving a full static projected calibration problem from scratch at every batch is both computationally expensive and conceptually unnecessary when the system evolves smoothly within a regime.
+
+Our starting point is therefore the following local-smoothness principle:
+
+\begin{quote}
+\emph{Within a regime, the projected calibration problem changes smoothly enough that the new posterior should fit the new batch while remaining close to the previous local posterior.}
+\end{quote}
+
+This suggests an online extension of the static two-stage view in which both the parameter posterior and the discrepancy posterior are updated by local, KL-regularized steps.
+
+\subsubsection{Local KL-regularized parameter update}
+\label{sec:theta_kl_update}
+
+We observe streaming batches
+\begin{equation}
+\mathcal B_t=\{(x_{t,k},y_{t,k})\}_{k=1}^{K_t},
+\qquad
+X_t=(x_{t,1},\ldots,x_{t,K_t}),
+\qquad
+Y_t=(y_{t,1},\ldots,y_{t,K_t})^\top .
+\end{equation}
+Let $q_{t-1}(\theta)$ denote the local posterior approximation for the calibration parameter before assimilating batch $t$. We define the \emph{local parameter search objective} by
+\begin{equation}
+q_t^\theta
+=
+\arg\min_{q}
+\left\{
+-\eta_\theta
+\mathbb E_q
+\big[
+\log p_{\mathrm{PF}}(Y_t\mid X_t,\theta)
+\big]
++
+\mathrm{KL}\!\left(q(\theta)\,\|\,\bar q_{t\mid t-1}(\theta)\right)
+\right\},
+\label{eq:theta_online_objective}
+\end{equation}
+where $\eta_\theta>0$ is a step-size / trust-region parameter and $\bar q_{t\mid t-1}$ is the predictive prior induced by the transition model,
+\begin{equation}
+\bar q_{t\mid t-1}(\theta_t)
+=
+\int
+p(\theta_t\mid \theta_{t-1})\,q_{t-1}(\theta_{t-1})
+\,d\theta_{t-1}.
+\label{eq:theta_predictive_prior}
+\end{equation}
+Here $p_{\mathrm{PF}}$ is deliberately chosen to be discrepancy-free:
+\begin{equation}
+p_{\mathrm{PF}}(Y_t\mid X_t,\theta)
+=
+\mathcal N\!\big(
+Y_t;\,
+\mu_s(X_t,\theta),\,
+\Sigma_s(X_t,\theta)+\sigma_{\mathrm{PF}}^2 I
+\big).
+\label{eq:theta_pf_likelihood}
+\end{equation}
+This is the projected-calibration analogue of a trust-region local search step: fit the new batch through the simulator channel while constraining the update to remain close to the predictive prior.
+
+\begin{proposition}[Tempered Bayesian form of the $\theta$-update]
+\label{prop:theta_tempered_bayes}
+The minimizer of \eqref{eq:theta_online_objective} is
+\begin{equation}
+q_t^\theta(\theta)
+\propto
+\bar q_{t\mid t-1}(\theta)\,
+p_{\mathrm{PF}}(Y_t\mid X_t,\theta)^{\eta_\theta}.
+\label{eq:theta_tempered_posterior}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Write the objective as
+\[
+\mathcal J_\theta(q)
+=
+-\eta_\theta \int q(\theta)\log p_{\mathrm{PF}}(Y_t\mid X_t,\theta)\,d\theta
++
+\int q(\theta)\log\frac{q(\theta)}{\bar q_{t\mid t-1}(\theta)}\,d\theta,
+\]
+subject to $\int q(\theta)\,d\theta=1$. Introducing a Lagrange multiplier $\alpha$ for normalization and taking the functional derivative gives
+\[
+-\eta_\theta \log p_{\mathrm{PF}}(Y_t\mid X_t,\theta)
++
+\log q(\theta)-\log \bar q_{t\mid t-1}(\theta)
++1+\alpha
+=0.
+\]
+Rearranging yields
+\[
+\log q(\theta)
+=
+\log \bar q_{t\mid t-1}(\theta)
++
+\eta_\theta \log p_{\mathrm{PF}}(Y_t\mid X_t,\theta)
++\mathrm{const},
+\]
+which is equivalent to \eqref{eq:theta_tempered_posterior}.
+\end{proof}
+
+\paragraph{Why particle filtering is an approximation to \eqref{eq:theta_online_objective}.}
+Suppose particles are first propagated according to the transition kernel
+\begin{equation}
+\theta_t^{(i)} \sim p(\theta_t\mid \theta_{t-1}^{(i)}),
+\label{eq:theta_pf_propagation}
+\end{equation}
+so that the propagated particles represent the predictive prior $\bar q_{t\mid t-1}$. If we then assign weights
+\begin{equation}
+\widetilde w_t^{(i)}
+\propto
+w_{t-1}^{(i)}
+\,p_{\mathrm{PF}}(Y_t\mid X_t,\theta_t^{(i)})^{\eta_\theta},
+\qquad
+w_t^{(i)}
+=
+\frac{\widetilde w_t^{(i)}}{\sum_j \widetilde w_t^{(j)}},
+\label{eq:theta_pf_tempered_weights}
+\end{equation}
+the resulting empirical measure
+\begin{equation}
+q_{t,N}^\theta
+=
+\sum_{i=1}^N w_t^{(i)}\,\delta_{\theta_t^{(i)}}
+\label{eq:theta_pf_empirical}
+\end{equation}
+is precisely a standard sequential Monte Carlo approximation to the tempered posterior \eqref{eq:theta_tempered_posterior}. Thus, in the idealized infinite-particle limit and under the usual SMC consistency conditions, the PF update approximates the minimizer of \eqref{eq:theta_online_objective}. This provides the formal bridge from the online optimization view to the data-assimilation style implementation.
+
+\subsubsection{Local KL-regularized discrepancy update}
+\label{sec:delta_kl_update}
+
+We now derive the discrepancy update. In the theory developed in this subsection, we use a particle-specific discrepancy posterior because it is the cleanest object from the standpoint of conditional online projected calibration. Later we will explain why the practical method used in the main experiments replaces this by a shared expert-level discrepancy state.
+
+Fix one propagated-and-reweighted parameter particle $\theta_t^{(i)}$. Its current residual batch is
+\begin{equation}
+r_t^{(i)}
+:=
+Y_t-\mu_s(X_t,\theta_t^{(i)}).
+\label{eq:particle_residual_batch}
+\end{equation}
+Let $S_{t-1}^{(i)}$ denote the historical support carried by the discrepancy posterior attached to particle $i$, and let
+\begin{equation}
+q_{t-1}^{(i)}\!\big(\delta_{S_{t-1}^{(i)}}\big)
+=
+\mathcal N\!\big(m_{t-1}^{(i)}, C_{t-1}^{(i)}\big)
+\label{eq:particle_old_delta_posterior}
+\end{equation}
+denote that posterior restricted to the historical support. Define the expanded support
+\begin{equation}
+S_t^{(i)} := S_{t-1}^{(i)} \cup X_t.
+\label{eq:expanded_support}
+\end{equation}
+The old posterior induces a predictive prior on the expanded support:
+\begin{equation}
+\widetilde q_{t\mid t-1}^{(i)}\!\big(\delta_{S_t^{(i)}}\big)
+=
+q_{t-1}^{(i)}\!\big(\delta_{S_{t-1}^{(i)}}\big)\,
+p\!\big(\delta_{X_t}\mid \delta_{S_{t-1}^{(i)}}\big),
+\label{eq:delta_predictive_prior}
+\end{equation}
+which is again Gaussian by GP conjugacy.
+
+We then define the online discrepancy objective by
+\begin{equation}
+q_t^{(i)}
+=
+\arg\min_q
+\left\{
+-\eta_\delta
+\mathbb E_q
+\big[
+\log p(r_t^{(i)}\mid \delta_{X_t})
+\big]
++
+\mathrm{KL}\!\left(
+q\!\big(\delta_{S_t^{(i)}}\big)
+\,\|\, 
+\widetilde q_{t\mid t-1}^{(i)}\!\big(\delta_{S_t^{(i)}}\big)
+\right)
+\right\},
+\label{eq:delta_online_objective}
+\end{equation}
+where the likelihood acts only on the new batch support, while the KL regularizer is taken against the old posterior predictive prior on the full expanded support. This is the exact online counterpart of the second stage of projected calibration: fit the residual mismatch induced by the current parameter, while retaining continuity with the previous discrepancy posterior.
+
+\begin{proposition}[Tempered Bayesian form of the discrepancy update]
+\label{prop:delta_tempered_bayes}
+The minimizer of \eqref{eq:delta_online_objective} is
+\begin{equation}
+q_t^{(i)}\!\big(\delta_{S_t^{(i)}}\big)
+\propto
+\widetilde q_{t\mid t-1}^{(i)}\!\big(\delta_{S_t^{(i)}}\big)\,
+p(r_t^{(i)}\mid \delta_{X_t})^{\eta_\delta}.
+\label{eq:delta_tempered_posterior}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+The proof is the same variational calculation as in Proposition~\ref{prop:theta_tempered_bayes}, now carried out on the finite-dimensional Gaussian variable $\delta_{S_t^{(i)}}$. Writing \eqref{eq:delta_online_objective} in integral form and differentiating with respect to $q\!\big(\delta_{S_t^{(i)}}\big)$ yields
+\[
+\log q_t^{(i)}\!\big(\delta_{S_t^{(i)}}\big)
+=
+\log \widetilde q_{t\mid t-1}^{(i)}\!\big(\delta_{S_t^{(i)}}\big)
++
+\eta_\delta \log p(r_t^{(i)}\mid \delta_{X_t})
++
+\mathrm{const},
+\]
+which is equivalent to \eqref{eq:delta_tempered_posterior}.
+\end{proof}
+
+\paragraph{Closed form under a GP discrepancy family.}
+Assume the discrepancy prior is Gaussian process and the residual likelihood is Gaussian:
+\begin{equation}
+r_t^{(i)} \mid \delta_{X_t}
+\sim
+\mathcal N(\delta_{X_t}, \Sigma_r).
+\label{eq:delta_residual_likelihood}
+\end{equation}
+Let $H_t^{(i)}$ denote the selection matrix extracting the current batch coordinates from $\delta_{S_t^{(i)}}$, so that
+\begin{equation}
+\delta_{X_t}
+=
+H_t^{(i)} \delta_{S_t^{(i)}}.
+\end{equation}
+If the predictive prior is
+\begin{equation}
+\widetilde q_{t\mid t-1}^{(i)}\!\big(\delta_{S_t^{(i)}}\big)
+=
+\mathcal N\!\big(
+\widetilde m_{t\mid t-1}^{(i)},
+\widetilde C_{t\mid t-1}^{(i)}
+\big),
+\label{eq:delta_predictive_prior_gaussian}
+\end{equation}
+then \eqref{eq:delta_tempered_posterior} remains Gaussian, with posterior precision and mean
+\begin{equation}
+\big(C_t^{(i)}\big)^{-1}
+=
+\big(\widetilde C_{t\mid t-1}^{(i)}\big)^{-1}
++
+\eta_\delta
+(H_t^{(i)})^\top \Sigma_r^{-1} H_t^{(i)},
+\label{eq:delta_exact_precision_update}
+\end{equation}
+\begin{equation}
+m_t^{(i)}
+=
+C_t^{(i)}
+\left[
+\big(\widetilde C_{t\mid t-1}^{(i)}\big)^{-1}\widetilde m_{t\mid t-1}^{(i)}
++
+\eta_\delta
+(H_t^{(i)})^\top \Sigma_r^{-1} r_t^{(i)}
+\right].
+\label{eq:delta_exact_mean_update}
+\end{equation}
+Equivalently, since tempering by $\eta_\delta$ is the same as using observation noise $(1/\eta_\delta)\Sigma_r$, the update may also be viewed as an ordinary GP posterior update with inflated noise.
+
+\paragraph{Equivalent proxy-dataset form.}
+Although the direct recursive form \eqref{eq:delta_exact_precision_update}--\eqref{eq:delta_exact_mean_update} is the cleanest numerical implementation, it is useful to note an exactly equivalent proxy-dataset interpretation.
+
+Let $H:=S_{t-1}^{(i)}$ and write the old posterior on the historical support as
+\begin{equation}
+q_{t-1}^{(i)}(\delta_H)
+=
+\mathcal N(m_H,C_H).
+\label{eq:old_hist_posterior}
+\end{equation}
+% Let the prior covariance on $H$ be $K_H:=K(H,H)$. We seek a pseudo-observation model
+% \begin{equation}
+% \widetilde y_H \mid \delta_H
+% \sim
+% \mathcal N(\delta_H,\Lambda_H)
+% \label{eq:pseudo_observation_model}
+% \end{equation}
+% whose posterior under the GP prior exactly reproduces \eqref{eq:old_hist_posterior}. Standard Gaussian conditioning shows that this is achieved by
+% \begin{equation}
+% \Lambda_H^{-1}
+% =
+% C_H^{-1}-K_H^{-1},
+% \label{eq:proxy_lambda}
+% \end{equation}
+% \begin{equation}
+% \widetilde y_H
+% =
+% \Lambda_H C_H^{-1} m_H.
+% \label{eq:proxy_y}
+% \end{equation}
+% Now append the current residual observation
+% \begin{equation}
+% r_t^{(i)} \mid \delta_{X_t}
+% \sim
+% \mathcal N(\delta_{X_t}, (1/\eta_\delta)\Sigma_r).
+% \label{eq:proxy_current_batch}
+% \end{equation}
+% Then fitting a single GP posterior on the combined dataset
+% \begin{equation}
+% X_{\mathrm{fit},t}^{(i)}=[H;X_t],
+% \qquad
+% y_{\mathrm{fit},t}^{(i)}=[\widetilde y_H;r_t^{(i)}],
+% \label{eq:proxy_dataset}
+% \end{equation}
+% with block observation noise
+% \begin{equation}
+% \Omega_t^{(i)}
+% =
+% \begin{bmatrix}
+% \Lambda_H & 0\\
+% 0 & (1/\eta_\delta)\Sigma_r
+% \end{bmatrix},
+% \label{eq:proxy_noise}
+% \end{equation}
+% produces exactly the same posterior as \eqref{eq:delta_tempered_posterior}. Thus the direct exact recursion and the proxy-dataset construction are mathematically equivalent under the Gaussian / GP assumptions.
+
+Let the prior covariance on $H$ be $K_H:=K(H,H)$. We seek a pseudo-observation model
+\begin{equation}
+\widetilde y_H \mid \delta_H
+\sim
+\mathcal N(\delta_H,\Lambda_H)
+\label{eq:pseudo_observation_model}
+\end{equation}
+whose posterior under the GP prior exactly reproduces \eqref{eq:old_hist_posterior}. Standard Gaussian conditioning shows that this is achieved whenever the historical posterior is absolutely continuous with respect to the prior on the finite support $H$, equivalently when
+\begin{equation}
+K_H \succ 0,\qquad C_H \succ 0,\qquad
+J_H := C_H^{-1}-K_H^{-1} \succeq 0.
+\label{eq:proxy_validity_condition}
+\end{equation}
+In that case one may define
+\begin{equation}
+\Lambda_H^{-1}
+=
+C_H^{-1}-K_H^{-1}
+=
+J_H,
+\label{eq:proxy_lambda}
+\end{equation}
+and
+\begin{equation}
+\widetilde y_H
+=
+\Lambda_H C_H^{-1} m_H.
+\label{eq:proxy_y}
+\end{equation}
+For exact finite-dimensional Gaussian posteriors obtained from a GP prior and Gaussian observations, \eqref{eq:proxy_validity_condition} holds in the positive semidefinite sense. Strict positive definiteness of $\Lambda_H^{-1}$ additionally requires that the historical observations contribute information in every direction on the support $H$.
+
+Now append the current residual observation
+\begin{equation}
+r_t^{(i)} \mid \delta_{X_t}
+\sim
+\mathcal N(\delta_{X_t}, (1/\eta_\delta)\Sigma_r).
+\label{eq:proxy_current_batch}
+\end{equation}
+
+Then fitting a single GP posterior on the combined dataset
+\begin{equation}
+X_{\mathrm{fit},t}^{(i)}=[H;X_t],
+\qquad
+y_{\mathrm{fit},t}^{(i)}=[\widetilde y_H;r_t^{(i)}],
+\label{eq:proxy_dataset}
+\end{equation}
+with block observation noise
+\begin{equation}
+\Omega_t^{(i)}
+=
+\begin{bmatrix}
+\Lambda_H & 0\\
+0 & (1/\eta_\delta)\Sigma_r
+\end{bmatrix},
+\label{eq:proxy_noise}
+\end{equation}
+produces exactly the same posterior as \eqref{eq:delta_tempered_posterior}. Thus the direct exact recursion and the proxy-dataset construction are mathematically equivalent under the Gaussian / GP assumptions.
+
+\paragraph{Practical note.}
+Although the proxy-dataset construction is mathematically exact under \eqref{eq:proxy_validity_condition}, it can be numerically fragile. The difficulty is that $\Lambda_H^{-1}$ is obtained as the difference of two precision matrices, and can therefore become ill-conditioned when the posterior is close to the prior, when observation noise is large, or when the support points are nearly collinear. For this reason, the direct recursive Gaussian update \eqref{eq:delta_exact_precision_update}--\eqref{eq:delta_exact_mean_update} is typically preferable in implementation, while the proxy form is retained mainly as an equivalent conceptual representation.
+
+% \subsubsection{Prediction and prequential likelihood}
+% \label{sec:prediction_likelihood_online_bpc}
+
+% The preceding derivation yields a natural joint approximation for one expert:
+% \begin{equation}
+% q_{e,t}(\theta,\delta)
+% \approx
+% \sum_{i=1}^N
+% w_{e,t}^{(i)}\,
+% \delta_{\theta_{e,t}^{(i)}}(\theta)\,
+% q_{e,t}^{(i)}(\delta).
+% \label{eq:joint_particle_delta_posterior}
+% \end{equation}
+% For BOCPD and prequential scoring, we must evaluate the \emph{pre-update} predictive density. Thus, before assimilating batch $t$, expert $e$ uses
+% \begin{equation}
+% q_{e,t-1}(\theta,\delta)
+% \approx
+% \sum_{i=1}^N
+% w_{e,t-1}^{(i)}\,
+% \delta_{\theta_{e,t-1}^{(i)}}(\theta)\,
+% q_{e,t-1}^{(i)}(\delta).
+% \label{eq:preupdate_joint_posterior}
+% \end{equation}
+% The predictive density is
+% \begin{equation}
+% p_e^{\mathrm{pre}}(Y_t\mid X_t)
+% =
+% \iint
+% p(Y_t\mid X_t,\theta,\delta)\,
+% q_{e,t-1}(\theta,\delta)\,
+% d\theta\,d\delta,
+% \label{eq:preupdate_predictive_general}
+% \end{equation}
+% where
+% \begin{equation}
+% Y_t\mid X_t,\theta,\delta
+% \sim
+% \mathcal N\!\big(
+% \mu_s(X_t,\theta)+\delta(X_t),\,
+% \Sigma_s(X_t,\theta)+\sigma^2 I
+% \big).
+% \label{eq:full_predictive_model}
+% \end{equation}
+% Because each $q_{e,t-1}^{(i)}(\delta)$ is Gaussian process posterior, its marginal on $X_t$ is Gaussian:
+% \begin{equation}
+% \delta(X_t)\mid q_{e,t-1}^{(i)}
+% \sim
+% \mathcal N\!\big(
+% m_{e,t-1}^{(i)}(X_t),\,
+% C_{e,t-1}^{(i)}(X_t,X_t)
+% \big).
+% \end{equation}
+% Hence the inner integral is closed form:
+% \begin{equation}
+% p(Y_t\mid X_t,\theta_{e,t-1}^{(i)},q_{e,t-1}^{(i)}(\delta))
+% =
+% \mathcal N\!\Big(
+% Y_t;\,
+% \mu_s(X_t,\theta_{e,t-1}^{(i)})+m_{e,t-1}^{(i)}(X_t),\,
+% \Sigma_s(X_t,\theta_{e,t-1}^{(i)})
+% +
+% C_{e,t-1}^{(i)}(X_t,X_t)
+% +
+% \sigma^2 I
+% \Big).
+% \label{eq:particle_predictive_closed_form}
+% \end{equation}
+% Therefore the expert-level prequential likelihood is the Gaussian mixture
+% \begin{equation}
+% p_e^{\mathrm{pre}}(Y_t\mid X_t)
+% =
+% \sum_{i=1}^N
+% w_{e,t-1}^{(i)}
+% \,
+% \mathcal N\!\Big(
+% Y_t;\,
+% \mu_s(X_t,\theta_{e,t-1}^{(i)})+m_{e,t-1}^{(i)}(X_t),\,
+% \Sigma_s(X_t,\theta_{e,t-1}^{(i)})
+% +
+% C_{e,t-1}^{(i)}(X_t,X_t)
+% +
+% \sigma^2 I
+% \Big).
+% \label{eq:expert_prequential_likelihood}
+% \end{equation}
+\subsubsection{Prediction and prequential likelihood}
+\label{sec:prediction_likelihood_online_bpc}
+
+The preceding derivation yields the following particle-based approximation for one expert:
+\begin{equation}
+q_{e,t}(\theta,\delta)
+\approx
+\sum_{i=1}^N
+w_{e,t}^{(i)}\,
+\delta_{\theta_{e,t}^{(i)}}(\theta)\,
+q_{e,t}^{(i)}(\delta).
+\label{eq:joint_particle_delta_posterior}
+\end{equation}
+Thus, before assimilating batch $t$, the pre-update predictive law is approximated by
+\begin{equation}
+p_e^{\mathrm{pre}}(Y_t\mid X_t)
+\approx
+\iint
+p(Y_t\mid X_t,\theta,\delta)\,
+q_{e,t-1}(\theta,\delta)\,
+d\theta\,d\delta,
+\label{eq:preupdate_predictive_general}
+\end{equation}
+where the approximation is entirely due to the particle representation of the $\theta$-marginal. Conditional on a fixed particle $\theta_{e,t-1}^{(i)}$, the marginalization over $\delta$ is exact under the Gaussian-process discrepancy posterior.
+
+Specifically, under
+\begin{equation}
+Y_t\mid X_t,\theta,\delta
+\sim
+\mathcal N\!\big(
+\mu_s(X_t,\theta)+\delta(X_t),\,
+\Sigma_s(X_t,\theta)+\sigma^2 I
+\big),
+\label{eq:full_predictive_model}
+\end{equation}
+and
+\begin{equation}
+\delta(X_t)\mid q_{e,t-1}^{(i)}
+\sim
+\mathcal N\!\big(
+m_{e,t-1}^{(i)}(X_t),\,
+C_{e,t-1}^{(i)}(X_t,X_t)
+\big),
+\end{equation}
+we obtain the exact conditional predictive density
+\begin{equation}
+p(Y_t\mid X_t,\theta_{e,t-1}^{(i)},q_{e,t-1}^{(i)}(\delta))
+=
+\mathcal N\!\Big(
+Y_t;\,
+\mu_s(X_t,\theta_{e,t-1}^{(i)})+m_{e,t-1}^{(i)}(X_t),\,
+\Sigma_s(X_t,\theta_{e,t-1}^{(i)})
++
+C_{e,t-1}^{(i)}(X_t,X_t)
++
+\sigma^2 I
+\Big).
+\label{eq:particle_predictive_closed_form}
+\end{equation}
+Therefore, under the particle approximation \eqref{eq:joint_particle_delta_posterior}, the expert-level prequential likelihood is the Gaussian mixture
+\begin{equation}
+p_e^{\mathrm{pre}}(Y_t\mid X_t)
+\approx
+\sum_{i=1}^N
+w_{e,t-1}^{(i)}
+\,
+\mathcal N\!\Big(
+Y_t;\,
+\mu_s(X_t,\theta_{e,t-1}^{(i)})+m_{e,t-1}^{(i)}(X_t),\,
+\Sigma_s(X_t,\theta_{e,t-1}^{(i)})
++
+C_{e,t-1}^{(i)}(X_t,X_t)
++
+\sigma^2 I
+\Big).
+\label{eq:expert_prequential_likelihood}
+\end{equation}
+
+\subsubsection{Outer regime adaptation via restarted BOCPD}
+\label{sec:rbocpd_outer_layer_online_bpc}
+
+The inner KL-regularized two-stage update above is based on a within-regime local-smoothness assumption. It is appropriate when the projected calibration problem evolves smoothly, but it is not intended to absorb arbitrarily large regime changes. For this reason we place an outer restarted BOCPD layer on top of the local learner.
+
+Concretely, each expert corresponds to a candidate segment. At batch $t$, before updating either $\theta$ or $\delta$, we evaluate the prequential likelihood \eqref{eq:expert_prequential_likelihood} and define the expert loss
+\begin{equation}
+\ell_{e,t}
+=
+-\log p_e^{\mathrm{pre}}(Y_t\mid X_t).
+\label{eq:expert_loss_online_bpc}
+\end{equation}
+These losses are passed to the restarted BOCPD recursion. The role of the outer layer is then:
+\begin{enumerate}[leftmargin=1.5em]
+    \item to determine whether the current local online-BPC problem remains valid;
+    \item to trigger hard restart when the evidence indicates a regime change;
+    \item to prevent stale local posterior states from being propagated indefinitely across incompatible regimes.
+\end{enumerate}
+In this interpretation, BOCPD is not part of the inner two-stage optimization itself. Rather, it is a regime-validity controller for the local optimizer.
+
+\paragraph{Why the BOCPD likelihood must be discrepancy-aware.}
+The change-point test should be applied to the full predictive decomposition, not to the simulator-only channel. The reason is that both the parameter posterior and the discrepancy posterior are local, regime-dependent objects. If the current regime changes, either of them may become invalid. Therefore the correct prequential evidence for BOCPD is \eqref{eq:expert_prequential_likelihood}, not a discrepancy-free likelihood based only on $\mu_s(X_t,\theta)$.
+
+\subsubsection{Relation to the half-discrepancy method}
+\label{sec:relation_half_discrepancy}
+
+We now clarify how the theory above relates to the half-discrepancy construction used in our main method.
+
+\paragraph{Same parameter update, different discrepancy update.}
+The $\theta$-step is the same in both views: in both cases, parameter particles are updated through the discrepancy-free simulator likelihood \eqref{eq:theta_pf_likelihood}. The structural difference lies entirely in the discrepancy channel.
+
+In the online-BPC formulation above, discrepancy is treated as a \emph{sequential latent posterior state}. For each parameter particle, the discrepancy posterior is transported forward by the KL-regularized update \eqref{eq:delta_online_objective}--\eqref{eq:delta_tempered_posterior}. In other words, discrepancy continuity is enforced directly at the posterior level.
+
+By contrast, in the half-discrepancy method, discrepancy is not transported as a recursive posterior state. Instead, at each step one constructs an explicit segment-level residual target under the current endpoint anchor and then refits a shared discrepancy model to that target. Abstractly, this may be written as
+\begin{equation}
+q_{e,t}^{\mathrm{HD}}(\delta)
+\propto
+p\!\big(\mathcal D_{e,t}^{\mathrm{res}}\mid \delta\big)\,p_0(\delta),
+\label{eq:half_discrepancy_refit}
+\end{equation}
+where $\mathcal D_{e,t}^{\mathrm{res}}$ is the current re-anchored residual dataset for expert $e$. Thus, the only structural difference is:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{online-BPC discrepancy update:} recursive posterior transport with KL continuity;
+    \item \textbf{half-discrepancy update:} re-anchored segment refit from an explicit residual target.
+\end{itemize}
+
+\paragraph{Different assumptions.}
+These two discrepancy updates correspond to different assumptions about what discrepancy is.
+
+The online-BPC view assumes that discrepancy itself is a local latent state whose posterior should evolve continuously across batches. This is natural if one believes that discrepancy is intrinsically dynamic and should be recursively filtered.
+
+The half-discrepancy view assumes instead that discrepancy should be interpreted as a segment-wise correction object conditional on the \emph{current} local anchor. Under this interpretation, propagating the old discrepancy posterior is not necessarily desirable, because old discrepancy states may be tied to outdated parameter anchors or outdated regime structure. Re-anchoring the residual dataset can therefore produce a cleaner discrepancy target.
+
+\paragraph{Why half-discrepancy may be more BOCPD-friendly.}
+The online-BPC update preserves posterior continuity, but this also means that a sufficiently flexible discrepancy posterior can continue to absorb newly emerging mismatch. In regimes with abrupt change, such recursive adaptation may partially flatten the predictive contrast between stale and fresh experts. By contrast, the half-discrepancy construction repeatedly re-expresses historical mismatch relative to the current endpoint anchor, which can yield a sharper segment-wise residual object and therefore stronger expert-wise evidence separation for BOCPD.
+
+For this reason, the online-BPC formulation should be interpreted primarily as a theory-first extension of projected calibration to the online setting, while the half-discrepancy design should be viewed as an engineering re-anchoring strategy that may be better aligned with regime discrimination.
+
+\paragraph{Shared discrepancy as an engineering simplification.}
+Finally, we note that the particle-specific discrepancy posterior used in this subsection is a theory-driven object. In practice, one may replace $\{q_{e,t}^{(i)}(\delta)\}_{i=1}^N$ by a single shared expert-level discrepancy posterior $q_{e,t}(\delta)$ in order to reduce variance, avoid particle-specific discrepancy confounding, and sharpen expert-level predictive evidence. We defer that engineering simplification and its empirical implications to the experimental section.
+
+
+\subsubsection{Implementation-Level Clarifications for Online-BPC}
+\label{sec:online_bpc_impl_clarifications}
+
+The preceding subsection gives the clean online-BPC recursion. The code used in the ablations implements several nearby objects, and it is important not to describe them as if they were all the same update.
+
+\paragraph{Reciprocal parameterization of discrepancy tempering.}
+The theory above uses a likelihood power $\eta_\delta$. The implementation instead parameterizes the same effect by its reciprocal
+\begin{equation}
+\lambda_\delta := \eta_\delta^{-1},
+\end{equation}
+so that the residual update is written with inflated observation covariance $\lambda_\delta \Sigma_r$. Thus the exact expanding-support update used by the \texttt{shared\_onlineBPC\_exact\_sigmaObs} path is
+\begin{equation}
+q_t(\delta_{S_t})
+\propto
+q_{t\mid t-1}(\delta_{S_t})
+\exp\!\left\{
+-\frac{1}{2\lambda_\delta}
+\big(r_t-H_t\delta_{S_t}\big)^\top
+\Sigma_r^{-1}
+\big(r_t-H_t\delta_{S_t}\big)
+\right\},
+\label{eq:delta_exact_lambda_form}
+\end{equation}
+which is algebraically the same update as \eqref{eq:delta_tempered_posterior} after the reparameterization $\lambda_\delta=\eta_\delta^{-1}$.
+
+\paragraph{What is exact and what is not.}
+Only some of the implemented variants are exact recursive posteriors under a fixed model family. The expanding-support states \texttt{shared\_onlineBPC\_exact\_sigmaObs} and \texttt{particleGP\_onlineBPC\_exact} are exact Gaussian recursions only when the GP hyperparameters are kept fixed after initialization. Once the hyperparameters are re-optimized after each batch, as in the diagnostic variants \texttt{shared\_onlineBPC\_exact\_refitHyper} and \texttt{shared\_onlineBPC\_proxyRefitHyper}, the old posterior is no longer algebraically compatible with a one-step Bayesian transport under a single prior. Those paths should therefore be interpreted as prediction-oriented rebuilds, not as strict exact recursions.
+
+The same distinction matters for the stable proxy path. The exact proxy-dataset representation would require
+\begin{equation}
+\Gamma_H^{-1}=C_H^{-1}-K_H^{-1},
+\qquad
+\widetilde y_H = \Gamma_H C_H^{-1} m_H,
+\label{eq:exact_proxy_reconstruction_appendix}
+\end{equation}
+on the historical support $H$. The implemented \texttt{shared\_onlineBPC\_proxyStableMean\_sigmaObs} variant does \emph{not} use \eqref{eq:exact_proxy_reconstruction_appendix}. Instead it replaces the historical pseudo-data by the mean-preserving surrogate
+\begin{equation}
+\widetilde y_H = m_H,
+\qquad
+\widetilde \Omega_H
+=
+\operatorname{diag}\!\big(\operatorname{diag}(C_H)\big)
++ \epsilon_H I,
+\label{eq:stablemean_proxy_surrogate}
+\end{equation}
+with a positive noise floor $\epsilon_H$. This stabilizes the update numerically and preserves the historical discrepancy mean on the correct scale, but it discards the off-diagonal historical posterior correlations. It should therefore be described as a stabilized approximation, not as an exact implementation of the proxy representation.
+
+\paragraph{Fixed-support discrepancy memory.}
+The fixed-support variants use a different memory object altogether. Rather than carrying the full posterior on the growing support $S_t$, they fix support points $Z=\{z_1,\dots,z_M\}$ once and propagate the inducing-value state
+\begin{equation}
+u := \delta(Z).
+\end{equation}
+Under the GP conditional law,
+\begin{equation}
+\delta(X_t)\mid u
+\sim
+\mathcal N\!\big(A_t u,\; R_t\big),
+\qquad
+A_t := K(X_t,Z)K(Z,Z)^{-1},
+\qquad
+R_t := K(X_t,X_t)-K(X_t,Z)K(Z,Z)^{-1}K(Z,X_t).
+\label{eq:fixedsupport_conditional_law}
+\end{equation}
+Hence the residual batch satisfies
+\begin{equation}
+r_t \mid u
+\sim
+\mathcal N\!\big(A_t u,\; R_t+\Sigma_r\big),
+\label{eq:fixedsupport_residual_law}
+\end{equation}
+and the online update is an exact Gaussian recursion in this projected model:
+\begin{align}
+\Lambda_t
+&=
+\Lambda_{t-1}
++
+\lambda_\delta^{-1}
+A_t^\top
+\big(R_t+\Sigma_r\big)^{-1}
+A_t,
+\label{eq:fixedsupport_precision_update}
+\\
+h_t
+&=
+h_{t-1}
++
+\lambda_\delta^{-1}
+A_t^\top
+\big(R_t+\Sigma_r\big)^{-1}
+r_t,
+\label{eq:fixedsupport_information_update}
+\\
+C_t &= \Lambda_t^{-1},
+\qquad
+m_t = C_t h_t.
+\label{eq:fixedsupport_mean_update}
+\end{align}
+What is lost here is not Bayesian exactness inside the projected model, but the ability to represent discrepancy directions outside the span induced by $Z$. For this reason, \texttt{shared\_onlineBPC\_fixedSupport\_sigmaObs} is best viewed as a structured state-compression of the online-BPC memory, not as the full exact GP posterior.
+
+\paragraph{Particle-specific fixed-support memory.}
+The particle-specific fixed-support path uses the same projected state model, but now each lineage carries its own mean $m_t^{(i)}$ for the inducing state $u^{(i)}$ while sharing the support $Z$ and the covariance recursion. For particle $i$,
+\begin{equation}
+r_t^{(i)}
+:=
+Y_t-\rho\,\eta(X_t,\theta_t^{(i)}),
+\label{eq:particle_fixedsupport_residual}
+\end{equation}
+and the update is
+\begin{equation}
+m_t^{(i)}
+=
+C_t
+\left[
+\Lambda_{t-1} m_{t-1}^{(i)}
++
+\lambda_\delta^{-1}
+A_t^\top
+\big(R_t+\Sigma_r\big)^{-1}
+r_t^{(i)}
+\right],
+\label{eq:particle_fixedsupport_mean_update}
+\end{equation}
+with the same $C_t$ for all particles because, in this linear-Gaussian model, the covariance update depends on $(A_t,R_t,\Sigma_r,\lambda_\delta)$ but not on the realized residual vector. After PF resampling, children inherit the parent discrepancy mean and continue the same lineage-bound update. This is why the particle-specific fixed-support variant preserves particle-level discrepancy memory without paying for one growing covariance matrix per particle.
+
+\paragraph{Noise semantics in the successful sigma-observation variants.}
+For the variants suffixed by \texttt{sigmaObs}, the code uses
+\begin{equation}
+\Sigma_r = \sigma_\varepsilon^2 I
+\label{eq:sigmaobs_residual_noise}
+\end{equation}
+for the discrepancy update, and the discrepancy predictor returns the latent GP variance rather than latent-plus-kernel-noise variance. The outer predictive law then adds exactly one copy of $\sigma_\varepsilon^2$. It is therefore incorrect to identify the GP kernel nugget with the residual-assimilation noise in these ablations, or to add both objects twice inside the predictive variance.
+
+\paragraph{Empirical implications of the memory design.}
+The ablations show that the best-performing implementation tricks are not the ones that preserve the largest posterior object. In a three-seed comparison on the \texttt{sudden}, \texttt{slope}, and \texttt{random\_walk} mechanisms, the shared exact expanding-support recursion and the stable-mean proxy were both better than shared fixed support on \texttt{random\_walk} (predictive MSE $0.1901$, $0.1872$, and $0.2307$, respectively), which indicates that aggressive state compression can underfit long smooth wandering. However, on \texttt{slope} and \texttt{sudden}, the shared fixed-support state was best among the online-BPC variants (predictive MSE $0.1137$ and $0.0962$, versus $0.1259/0.1206$ for shared exact and $0.1325/0.1334$ for stable-mean proxy). Importantly, this improvement did not come from fewer BOCPD restarts: on \texttt{slope} and \texttt{sudden}, the shared fixed-support path restarted \emph{more} often than the stable-mean proxy (mean restart count $10.33$ versus $6.0$, and $8.0$ versus $5.33$). The more defensible interpretation is that projecting the discrepancy memory to a fixed latent state $u=\delta(Z)$ regularizes the local predictive law itself, rather than merely changing restart frequency.
+
+The particle-specific fixed-support ablation shows a second useful tradeoff. Relative to the shared fixed-support state, the particle-specific version improves \texttt{random\_walk} (predictive MSE $0.1876$ versus $0.2307$) while using the same support size, which is consistent with the idea that particle-level residual channels matter when calibration uncertainty and smooth discrepancy evolution remain entangled. On \texttt{slope} and \texttt{sudden}, however, the shared fixed-support state remains slightly better ($0.1137$ versus $0.1214$, and $0.0962$ versus $0.1043$), so particle-specific memory should be read as a bias-variance tradeoff rather than a uniform improvement.
+
+Finally, the stable-mean proxy should be interpreted as a numerical stabilization trick, not as a faithful algebraic surrogate of the exact recursion. Its main practical benefit is calmer restart behavior under BOCPD. In the same three-seed comparison, its mean restart count is substantially smaller than that of the shared exact expanding-support state on \texttt{random\_walk}, \texttt{slope}, and \texttt{sudden} ($2.33$ versus $5.0$, $6.0$ versus $10.33$, and $5.33$ versus $9.33$, respectively), even though its predictive MSE is not always the smallest. This is exactly the kind of engineering tradeoff that should be reported as such.
+
+\subsubsection{A Window-Limited CUSUM Controller for Single-Segment Online-BPC}
+\label{sec:wcusum_controller}
+
+The BOCPD analysis above concerns the multi-expert restarted controller. The implementation also includes a single-segment alternative, denoted wCUSUM, for the shared online-BPC paths. This controller should not be described as BOCPD: it keeps exactly one active segment, does not propagate hazard masses, and restarts only when a recent-window score shift exceeds a threshold.
+
+\paragraph{Pre-update score.}
+Let $M_{t^-}$ denote the current local model before assimilating batch $t$, and let $B_t$ be the batch size. The implemented score is the transformed pre-update surprise
+\begin{equation}
+s_t
+:=
+\log\!\left(
+1 + \bar \ell_t
+\right),
+\qquad
+\bar \ell_t
+:=
+-\frac{1}{B_t}\log p(Y_t \mid X_t, M_{t^-}),
+\label{eq:wcusum_score}
+\end{equation}
+which is exactly the code path called \texttt{controller\_stat="log\_surprise\_mean"}.
+
+\paragraph{Window-limited standardized shift detector.}
+Within the current segment, suppose the score sequence since the last restart is $(s_1,\dots,s_t)$. For each window length $m \in \{1,\dots,W\}$, define the baseline mean and scale from the preceding segment history:
+\begin{equation}
+\mu_{0,m}
+:=
+\frac{1}{t-m}\sum_{u=1}^{t-m} s_u,
+\qquad
+\sigma_{0,m}
+:=
+\max\!\left\{
+\operatorname{sd}(s_{1:t-m}),
+\sigma_{\min}
+\right\}.
+\label{eq:wcusum_baseline}
+\end{equation}
+Let
+\begin{equation}
+\bar s_{t,m}
+:=
+\frac{1}{m}\sum_{u=t-m+1}^{t} s_u.
+\end{equation}
+The window statistic is
+\begin{equation}
+G_{t,m}
+:=
+\sqrt{m}\,
+\left[
+\frac{\bar s_{t,m}-\mu_{0,m}}{\sigma_{0,m}}
+- \kappa
+\right]_+,
+\label{eq:wcusum_window_stat}
+\end{equation}
+and the controller uses the maximized score
+\begin{equation}
+G_t := \max_{1 \le m \le W} G_{t,m}.
+\label{eq:wcusum_max_stat}
+\end{equation}
+A restart is triggered when
+\begin{equation}
+G_t > h.
+\label{eq:wcusum_alarm_rule}
+\end{equation}
+The first usable ablation used $(W,h,\kappa,\sigma_{\min})=(4,0.25,0.25,0.25)$ with a warmup of three batches. These are engineering defaults chosen for the synthetic experiments; they are not presented as asymptotically tuned optimal parameters.
+
+\paragraph{What wCUSUM changes and what it does not.}
+The wCUSUM controller acts only on the outer restart decision. It does not alter PF weighting, and it does not change the local discrepancy state update itself. Thus its role is narrower than BOCPD: it is a score-driven restart rule for a single local learner, not a multi-expert posterior over run lengths.
+
+\paragraph{Empirical tradeoff relative to BOCPD.}
+On a five-seed sudden-jump ablation with jump magnitude $2.0$, wCUSUM substantially reduced extra restarts for the shared online-BPC paths. For \texttt{shared\_onlineBPC\_proxyStableMean\_sigmaObs}, the mean restart count dropped from $4.2$ under BOCPD to $3.0$ under wCUSUM, the mean false-alarm count dropped from $2.0$ to $0.4$, the mean matched changepoint hits increased from $2.2$ to $2.6$, and the mean conditional delay decreased from $0.53$ to $0.0$, with only a small predictive change (predictive MSE $1.2121$ versus $1.2194$). For \texttt{shared\_onlineBPC\_exact\_sigmaObs}, the mean restart count dropped from $7.4$ to $3.0$ and the mean false-alarm count from $4.6$ to $0.6$, again at the price of only a modest predictive degradation (predictive MSE $1.5789$ versus $1.6299$). The clean conclusion is therefore not that wCUSUM dominates BOCPD as a predictor, but that it can be a much cleaner restart controller for online-BPC when the main objective is changepoint alignment rather than minimal prequential loss.
+
+The same score was essentially inactive for the current inducing-path baseline, so the wCUSUM controller is not yet plug-compatible across all local learners. That negative result is also important: the outer controller and the local discrepancy state must be matched, rather than discussed as if they were modularly interchangeable.
+\end{document}

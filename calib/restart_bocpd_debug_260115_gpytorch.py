@@ -1,0 +1,1548 @@
+# =============================================================
+# file: calib/restart_bocpd.py
+# R-BOCPD with restart rule + debug exports
+# Compatible with OnlineBayesCalibrator.__init__ in online_calibrator.py
+# TODO: change restart criteria from rank change to theta test
+# =============================================================
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
+import math
+import torch
+
+from .configs import BOCPDConfig, ModelConfig, PFConfig
+from .pf import ParticleFilter
+from .particles import ParticleSet
+from .delta_gp import *
+from .likelihood import loglik_and_grads
+from .kernels import make_kernel
+from .emulator import Emulator
+from .expert_delta import ExpertDeltaFitter
+
+
+@dataclass
+class Expert:
+    run_length: int
+    pf: ParticleFilter
+    delta_state: Optional[Any]
+    log_mass: float          # log posterior mass for this expert
+    X_hist: torch.Tensor     # [M, dx]
+    y_hist: torch.Tensor     # [M]
+    delta_meta: Dict[str, Any] = field(default_factory=dict)
+
+
+# calib/diagnostics_llr.py
+from collections import deque
+import numpy as np
+import math
+
+class RollingStats:
+    def __init__(self, window: int = 50):
+        self.window = int(window)
+        self.buf = deque(maxlen=self.window)
+
+    def update(self, x: float):
+        self.buf.append(float(x))
+
+    def mean(self) -> float:
+        if len(self.buf) == 0:
+            return float("nan")
+        return float(np.mean(self.buf))
+
+    def std(self) -> float:
+        if len(self.buf) == 0:
+            return float("nan")
+        return float(np.std(self.buf, ddof=1)) if len(self.buf) >= 2 else 0.0
+
+    def n(self) -> int:
+        return len(self.buf)
+
+class BOCPD:
+    """
+    Restart-BOCPD implementation used as `RestartBOCPD` in OnlineBayesCalibrator.
+
+    关键点：
+    - 支持 Algorithm-2 完全重启 和 backdated restart 两种模式：
+        * use_backdated_restart=False → Algorithm-2 (r ← t+1, 全部重新 sample)
+        * use_backdated_restart=True  → 从 (r..t] 中选 s* 作为新的 r，保留那个 expert
+    - 每次 update / update_batch 返回 `experts_debug`，
+      内含每个 expert 的 run_length, start_time, mass, theta_mean, log_ump 等信息。
+    """
+
+    def __init__(
+        self,
+        config: BOCPDConfig,
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
+        delta_fitter: Optional[ExpertDeltaFitter] = None,
+        on_restart: Optional[Callable] = None,
+        notify_on_restart: bool = True,
+        **kwargs,
+    ):
+        """
+        注意：签名要兼容 OnlineBayesCalibrator 里的调用：
+            RestartBOCPD(
+                config=config.bocpd,
+                device=config.model.device,
+                dtype=config.model.dtype,
+                delta_fitter=None,
+                on_restart=on_restart,
+                notify_on_restart=notify_on_restart,
+            )
+        """
+        self.config: BOCPDConfig = config
+        self.device = device
+        self.dtype = dtype
+
+        self.experts: List[Expert] = []
+        self.t: int = 0  # processed points count
+        self.restart_start_time: int = 0
+        self._last_restart_t: int = -10**9
+        self.prev_max_ump: float = 0.0
+
+        self.delta_fitter = delta_fitter
+
+        # R-BOCPD hyperparams
+        self.restart_margin: float = getattr(config, "restart_margin", 0.05)
+        self.restart_cooldown: int = getattr(config, "restart_cooldown", 10)
+
+        self.delta_refit_every: int = getattr(config, "delta_refit_every", 0)
+        self.delta_refit_topk: int = getattr(config, "delta_refit_topk", 3)
+
+        self.on_restart = on_restart
+        self.notify_on_restart = notify_on_restart
+
+        self.restart_criteria = getattr(config, "restart_criteria", "rank_change")
+        self.theta_anchor = None
+
+    # ------------------------------------------------------------------
+    # internal helpers
+    # ------------------------------------------------------------------
+
+    def _init_empty_delta_state(self, dx: int, model_cfg: ModelConfig) -> OnlineGPState:
+        # kernel = make_kernel(model_cfg.delta_kernel)
+        # return OnlineGPState(
+        #     X=torch.empty(0, dx, dtype=model_cfg.dtype, device=model_cfg.device),
+        #     y=torch.empty(0, dtype=model_cfg.dtype, device=model_cfg.device),
+        #     kernel=kernel,
+        #     noise=model_cfg.delta_kernel.noise,
+        #     update_mode="exact_full",
+        #     hyperparam_mode="fit",
+        # )
+        return None
+
+    def _spawn_new_expert(
+        self,
+        model_cfg: ModelConfig,
+        pf_cfg: PFConfig,
+        prior_sampler: Callable[[int], torch.Tensor],
+        dx: int,
+        log_mass: float,
+    ) -> Expert:
+        delta_state = self._init_empty_delta_state(dx, model_cfg)
+        pf = ParticleFilter.from_prior(
+            prior_sampler,
+            pf_cfg,
+            device=self.device,
+            dtype=self.dtype,
+            theta_anchor=self.theta_anchor,
+        )
+        return Expert(
+            run_length=0,
+            pf=pf,
+            delta_state=delta_state,
+            log_mass=log_mass,
+            X_hist=torch.empty(0, dx, dtype=self.dtype, device=self.device),
+            y_hist=torch.empty(0, dtype=self.dtype, device=self.device),
+        )
+
+
+    def _append_hist_batch(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        Y_batch: torch.Tensor,
+        max_len: int,
+    ) -> None:
+        if e.X_hist.numel() == 0:
+            e.X_hist = X_batch.clone()
+            e.y_hist = Y_batch.clone()
+        else:
+            e.X_hist = torch.cat([e.X_hist, X_batch], dim=0)
+            e.y_hist = torch.cat([e.y_hist, Y_batch], dim=0)
+        # if e.X_hist.shape[0] > max_len:
+        #     e.X_hist = e.X_hist[-max_len:, :]
+        #     e.y_hist = e.y_hist[-max_len:]
+
+    def _delta_update_mode(self, model_cfg: ModelConfig) -> str:
+        return str(getattr(model_cfg, "delta_update_mode", "refit")).lower()
+
+    def _shared_delta_model(self, model_cfg: ModelConfig) -> str:
+        return str(getattr(model_cfg, "shared_delta_model", "gp")).lower()
+
+    def _delta_online_min_points(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_online_min_points", 3)), 1)
+
+    def _delta_basis_num_features(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_basis_num_features", getattr(model_cfg, "delta_dynamic_num_features", 20))), 1)
+
+    def _delta_basis_prior_var_scale(self, model_cfg: ModelConfig) -> float:
+        return max(float(getattr(model_cfg, "delta_basis_prior_var_scale", getattr(model_cfg, "delta_dynamic_prior_var_scale", 1.0))), 1e-6)
+
+    def _delta_basis_fix_hyper(self, model_cfg: ModelConfig) -> bool:
+        return bool(getattr(model_cfg, "delta_basis_fix_hyper", False))
+
+    def _delta_dynamic_num_features(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_dynamic_num_features", 8)), 1)
+
+    def _delta_dynamic_forgetting(self, model_cfg: ModelConfig) -> float:
+        return min(max(float(getattr(model_cfg, "delta_dynamic_forgetting", 0.98)), 1e-4), 1.0)
+
+    def _delta_dynamic_process_noise_scale(self, model_cfg: ModelConfig) -> float:
+        return max(float(getattr(model_cfg, "delta_dynamic_process_noise_scale", 1e-3)), 0.0)
+
+    def _delta_dynamic_prior_var_scale(self, model_cfg: ModelConfig) -> float:
+        return max(float(getattr(model_cfg, "delta_dynamic_prior_var_scale", 1.0)), 1e-6)
+
+    def _delta_dynamic_buffer_max_points(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_dynamic_buffer_max_points", 256)), self._delta_online_min_points(model_cfg))
+
+    def _delta_bpc_lambda(self, model_cfg: ModelConfig) -> float:
+        return max(float(getattr(model_cfg, "delta_bpc_lambda", 1.0)), 1e-6)
+
+    def _delta_bpc_obs_noise_mode(self, model_cfg: ModelConfig) -> str:
+        mode = str(getattr(model_cfg, "delta_bpc_obs_noise_mode", "kernel"))
+        return mode if mode in {"kernel", "sigma_eps"} else "kernel"
+
+    def _delta_bpc_obs_noise_var(self, model_cfg: ModelConfig):
+        if self._delta_bpc_obs_noise_mode(model_cfg) == "sigma_eps":
+            return max(float(getattr(model_cfg, "sigma_eps", 0.05)) ** 2, 1e-8)
+        return None
+
+    def _delta_bpc_predict_add_kernel_noise(self, model_cfg: ModelConfig) -> bool:
+        return bool(getattr(model_cfg, "delta_bpc_predict_add_kernel_noise", True))
+
+    def _delta_inducing_num_points(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_inducing_num_points", 20)), 1)
+
+    def _delta_inducing_init_steps(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_inducing_init_steps", 40)), 0)
+
+    def _delta_inducing_update_steps(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_inducing_update_steps", 6)), 0)
+
+    def _delta_inducing_lr(self, model_cfg: ModelConfig) -> float:
+        return max(float(getattr(model_cfg, "delta_inducing_lr", 0.03)), 1e-5)
+
+    def _delta_inducing_buffer_max_points(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_inducing_buffer_max_points", 256)), self._delta_online_min_points(model_cfg))
+
+    def _delta_inducing_learn_locations(self, model_cfg: ModelConfig) -> bool:
+        return bool(getattr(model_cfg, "delta_inducing_learn_locations", False))
+
+    def _delta_mc_num_inducing_points(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_mc_num_inducing_points", 16)), 1)
+
+    def _delta_mc_num_particles(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_mc_num_particles", 8)), 1)
+
+    def _delta_mc_resample_ess_ratio(self, model_cfg: ModelConfig) -> float:
+        return min(max(float(getattr(model_cfg, "delta_mc_resample_ess_ratio", 0.5)), 1e-6), 1.0)
+
+    def _delta_mc_refresh_every(self, model_cfg: ModelConfig) -> int:
+        return max(int(getattr(model_cfg, "delta_mc_refresh_every", 0)), 0)
+
+    def _delta_mc_include_conditional_var(self, model_cfg: ModelConfig) -> bool:
+        return bool(getattr(model_cfg, "delta_mc_include_conditional_var", True))
+
+    def _trim_delta_batch_sizes(self, sizes, keep_n: int):
+        keep_n = max(int(keep_n), 0)
+        if keep_n <= 0 or not sizes:
+            return []
+        rem = keep_n
+        kept = []
+        for size in reversed(list(sizes)):
+            size_i = int(size)
+            if rem <= 0:
+                break
+            take = min(size_i, rem)
+            kept.append(take)
+            rem -= take
+        return list(reversed(kept))
+
+    def _append_delta_online_buffer(self, e: Expert, X_batch: torch.Tensor, y_batch: torch.Tensor):
+        meta = e.delta_meta
+        X_new = X_batch.detach().clone()
+        y_new = y_batch.detach().clone().reshape(-1)
+        if meta.get("delta_online_X") is None:
+            meta["delta_online_X"] = X_new
+            meta["delta_online_y"] = y_new
+            meta["delta_online_batch_sizes"] = [int(y_new.shape[0])]
+        else:
+            meta["delta_online_X"] = torch.cat([meta["delta_online_X"], X_new], dim=0)
+            meta["delta_online_y"] = torch.cat([meta["delta_online_y"], y_new], dim=0)
+            meta.setdefault("delta_online_batch_sizes", []).append(int(y_new.shape[0]))
+        return meta["delta_online_X"], meta["delta_online_y"]
+
+    def _trim_delta_online_buffer(self, e: Expert, keep_n: int):
+        meta = e.delta_meta
+        X_buf = meta.get("delta_online_X")
+        y_buf = meta.get("delta_online_y")
+        if X_buf is None or y_buf is None or X_buf.numel() == 0:
+            return None, None
+        keep_n = max(int(keep_n), 0)
+        if keep_n <= 0:
+            meta["delta_online_X"] = None
+            meta["delta_online_y"] = None
+            meta["delta_online_batch_sizes"] = []
+            return None, None
+        meta["delta_online_X"] = X_buf[-keep_n:].clone()
+        meta["delta_online_y"] = y_buf[-keep_n:].clone()
+        meta["delta_online_batch_sizes"] = self._trim_delta_batch_sizes(meta.get("delta_online_batch_sizes", []), keep_n)
+        return meta["delta_online_X"], meta["delta_online_y"]
+
+    def _shared_batch_residual(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        Y_batch: torch.Tensor,
+        emulator: Emulator,
+        model_cfg: ModelConfig,
+    ) -> Optional[torch.Tensor]:
+        mu_eta_all, _ = emulator.predict(X_batch, e.pf.particles.theta)
+        weights = e.pf.particles.weights().view(1, -1)
+        if torch.isnan(weights).any() or weights.sum() < 1e-30:
+            return None
+        if mu_eta_all.dim() == 2:
+            eta_mix_all = (weights * mu_eta_all).sum(dim=1)
+        else:
+            eta_mix_all = (weights.unsqueeze(-1) * mu_eta_all).sum(dim=1)
+        resid_all = Y_batch - model_cfg.rho * eta_mix_all
+        resid_for_delta = (
+            resid_all.mean(dim=-1)
+            if resid_all.dim() > 1 and resid_all.shape[-1] > 1
+            else resid_all.reshape(-1)
+        )
+        if torch.isnan(resid_for_delta).any() or torch.isinf(resid_for_delta).any():
+            return None
+        return resid_for_delta
+
+    def _refit_shared_delta_from_history(self, e: Expert, emulator: Emulator, model_cfg: ModelConfig) -> None:
+        X_hist = e.X_hist
+        Y_hist = e.y_hist
+        mu_eta_all, _ = emulator.predict(X_hist, e.pf.particles.theta)
+        weights = e.pf.particles.weights().view(1, -1)
+        if torch.isnan(weights).any() or weights.sum() < 1e-30:
+            return
+        if mu_eta_all.dim() == 2:
+            eta_mix_all = (weights * mu_eta_all).sum(dim=1)
+        else:
+            eta_mix_all = (weights.unsqueeze(-1) * mu_eta_all).sum(dim=1)
+        resid_all = Y_hist - model_cfg.rho * eta_mix_all
+        resid_for_delta = (
+            resid_all.mean(dim=-1)
+            if resid_all.dim() > 1 and resid_all.shape[-1] > 1
+            else resid_all.reshape(-1)
+        )
+        if torch.isnan(resid_for_delta).any() or torch.isinf(resid_for_delta).any():
+            return
+        try:
+            if self._shared_delta_model(model_cfg) == "basis":
+                if self._delta_basis_fix_hyper(model_cfg):
+                    spec = e.delta_meta.get("delta_basis_fixed_hyper_spec")
+                    if spec is None:
+                        spec = self._fit_shared_online_hyper(X_hist, resid_for_delta, model_cfg)
+                        e.delta_meta["delta_basis_fixed_hyper_spec"] = spec
+                else:
+                    spec = self._fit_shared_online_hyper(X_hist, resid_for_delta, model_cfg)
+                e.delta_state = BasisPosteriorDeltaState(
+                    hyper_spec=spec,
+                    X=X_hist,
+                    y=resid_for_delta,
+                    num_features=self._delta_basis_num_features(model_cfg),
+                    prior_var_scale=self._delta_basis_prior_var_scale(model_cfg),
+                )
+                return
+            kernel = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+            delta_state = GPyTorchDeltaState(
+                X=X_hist,
+                y=resid_for_delta,
+                kernel=kernel,
+                noise=model_cfg.delta_kernel.noise,
+            )
+            e.delta_state = fit_gpytorch_delta(delta_state, max_iter=150)
+        except Exception:
+            pass
+
+    def _fit_shared_online_hyper(self, X_hist: torch.Tensor, resid_hist: torch.Tensor, model_cfg: ModelConfig):
+        spec = fit_scale_rbf_gpytorch_hyper(
+            X_hist,
+            resid_hist,
+            noise=float(model_cfg.delta_kernel.noise),
+            lengthscale_init=getattr(model_cfg.delta_kernel, "lengthscale", 1.0),
+            variance_init=float(getattr(model_cfg.delta_kernel, "variance", 0.1)),
+            max_iter=int(getattr(model_cfg, "delta_online_init_max_iter", 80)),
+        )
+        return spec
+
+    def _build_shared_dynamic_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        batch_sizes,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return DynamicBasisDeltaState(
+            hyper_spec=spec,
+            X_init=X_hist,
+            y_init=resid_hist,
+            batch_sizes=list(batch_sizes) if batch_sizes else None,
+            num_features=self._delta_dynamic_num_features(model_cfg),
+            forgetting=self._delta_dynamic_forgetting(model_cfg),
+            process_noise_scale=self._delta_dynamic_process_noise_scale(model_cfg),
+            prior_var_scale=self._delta_dynamic_prior_var_scale(model_cfg),
+        )
+
+    def _build_shared_bpc_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return SharedBatchSupportOnlineBPCDeltaState(
+            X_init=X_hist,
+            y_init=resid_hist,
+            hyper_spec=spec,
+            lambda_delta=self._delta_bpc_lambda(model_cfg),
+            obs_noise_var=self._delta_bpc_obs_noise_var(model_cfg),
+            add_kernel_noise_to_predict=self._delta_bpc_predict_add_kernel_noise(model_cfg),
+        )
+
+    def _build_shared_exact_bpc_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return SharedExactOnlineBPCDeltaState(
+            X_init=X_hist,
+            y_init=resid_hist,
+            hyper_spec=spec,
+            lambda_delta=self._delta_bpc_lambda(model_cfg),
+            obs_noise_var=self._delta_bpc_obs_noise_var(model_cfg),
+            add_kernel_noise_to_predict=self._delta_bpc_predict_add_kernel_noise(model_cfg),
+        )
+
+    def _build_shared_proxy_bpc_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return SharedProxyDatasetOnlineBPCDeltaState(
+            X_init=X_hist,
+            y_init=resid_hist,
+            hyper_spec=spec,
+            lambda_delta=self._delta_bpc_lambda(model_cfg),
+            refit_max_iter=int(getattr(model_cfg, "delta_online_init_max_iter", 0)),
+            obs_noise_var=self._delta_bpc_obs_noise_var(model_cfg),
+            add_kernel_noise_to_predict=self._delta_bpc_predict_add_kernel_noise(model_cfg),
+        )
+
+    def _build_shared_proxy_stable_bpc_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return SharedStableMeanProxyOnlineBPCDeltaState(
+            X_init=X_hist,
+            y_init=resid_hist,
+            hyper_spec=spec,
+            lambda_delta=self._delta_bpc_lambda(model_cfg),
+            refit_max_iter=int(getattr(model_cfg, "delta_online_init_max_iter", 0)),
+            obs_noise_var=self._delta_bpc_obs_noise_var(model_cfg),
+            add_kernel_noise_to_predict=self._delta_bpc_predict_add_kernel_noise(model_cfg),
+        )
+
+    def _build_shared_fixedsupport_exact_bpc_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return SharedFixedSupportOnlineBPCDeltaState(
+            X_init=X_hist,
+            y_init=resid_hist,
+            hyper_spec=spec,
+            num_support=self._delta_inducing_num_points(model_cfg),
+            lambda_delta=self._delta_bpc_lambda(model_cfg),
+            obs_noise_var=self._delta_bpc_obs_noise_var(model_cfg),
+            add_kernel_noise_to_predict=self._delta_bpc_predict_add_kernel_noise(model_cfg),
+        )
+
+    def _build_shared_inducing_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return OnlineInducingGPyTorchDeltaState(
+            X=X_hist,
+            y=resid_hist,
+            hyper_spec=spec,
+            num_inducing=self._delta_inducing_num_points(model_cfg),
+            init_steps=self._delta_inducing_init_steps(model_cfg),
+            update_steps=self._delta_inducing_update_steps(model_cfg),
+            lr=self._delta_inducing_lr(model_cfg),
+            buffer_max_points=self._delta_inducing_buffer_max_points(model_cfg),
+            learn_inducing_locations=self._delta_inducing_learn_locations(model_cfg),
+        )
+
+    def _build_shared_mc_inducing_state(
+        self,
+        X_hist: torch.Tensor,
+        resid_hist: torch.Tensor,
+        model_cfg: ModelConfig,
+        *,
+        spec=None,
+    ):
+        if spec is None:
+            spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+        return SharedMCInducingDeltaState(
+            X_init=X_hist,
+            y_init=resid_hist,
+            hyper_spec=spec,
+            num_inducing=self._delta_mc_num_inducing_points(model_cfg),
+            num_particles=self._delta_mc_num_particles(model_cfg),
+            resample_ess_ratio=self._delta_mc_resample_ess_ratio(model_cfg),
+            include_conditional_var=self._delta_mc_include_conditional_var(model_cfg),
+        )
+
+    def _reset_shared_delta_from_mode(self, e: Expert, emulator: Emulator, model_cfg: ModelConfig) -> None:
+        mode = self._delta_update_mode(model_cfg)
+        if mode in {"online_bpc", "online_bpc_exact", "online_bpc_exact_refithyper", "online_bpc_proxy_refithyper", "online_bpc_proxy_stablemean", "online_bpc_fixedsupport_exact"}:
+            buf_X = e.delta_meta.get("delta_online_X")
+            buf_y = e.delta_meta.get("delta_online_y")
+            batch_sizes = e.delta_meta.get("delta_online_batch_sizes", [])
+            if buf_X is None or buf_y is None or buf_X.numel() == 0 or buf_y.numel() == 0:
+                hist_info = self._shared_residual_history_for_reset(e, emulator, model_cfg)
+                if hist_info is None:
+                    e.delta_state = None
+                    return
+                buf_X, buf_y = hist_info
+                batch_sizes = [int(buf_X.shape[0])]
+            min_points = self._delta_online_min_points(model_cfg)
+            if buf_X.shape[0] < min_points:
+                e.delta_state = None
+                return
+            spec = e.delta_meta.get("delta_online_hyper_spec")
+            if mode == "online_bpc_exact_refithyper":
+                spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+                e.delta_meta["delta_online_hyper_spec"] = spec
+                e.delta_state = self._build_shared_exact_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+            elif mode == "online_bpc_proxy_refithyper":
+                spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+                e.delta_meta["delta_online_hyper_spec"] = spec
+                e.delta_state = self._build_shared_proxy_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+            elif mode == "online_bpc_proxy_stablemean":
+                spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+                e.delta_meta["delta_online_hyper_spec"] = spec
+                e.delta_state = self._build_shared_proxy_stable_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+            elif mode == "online_bpc_fixedsupport_exact":
+                spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+                e.delta_meta["delta_online_hyper_spec"] = spec
+                e.delta_state = self._build_shared_fixedsupport_exact_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+            else:
+                if spec is None:
+                    spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+                    e.delta_meta["delta_online_hyper_spec"] = spec
+                if mode == "online_bpc_exact":
+                    e.delta_state = self._build_shared_exact_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+                else:
+                    last_size = int(batch_sizes[-1]) if batch_sizes else int(buf_X.shape[0])
+                    last_size = max(1, min(last_size, int(buf_X.shape[0])))
+                    e.delta_state = self._build_shared_bpc_state(buf_X[-last_size:], buf_y[-last_size:], model_cfg, spec=spec)
+            return
+        if mode in {"online_dynamic", "online_inducing"}:
+            buf_X = e.delta_meta.get("delta_online_X")
+            buf_y = e.delta_meta.get("delta_online_y")
+            batch_sizes = e.delta_meta.get("delta_online_batch_sizes", [])
+            if buf_X is None or buf_y is None or buf_X.numel() == 0 or buf_y.numel() == 0:
+                hist_info = self._shared_residual_history_for_reset(e, emulator, model_cfg)
+                if hist_info is None:
+                    e.delta_state = None
+                    return
+                buf_X, buf_y = hist_info
+                batch_sizes = [int(buf_X.shape[0])]
+            min_points = self._delta_online_min_points(model_cfg)
+            if buf_X.shape[0] < min_points:
+                e.delta_state = None
+                return
+            spec = e.delta_meta.get("delta_online_hyper_spec")
+            if spec is None:
+                spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+                e.delta_meta["delta_online_hyper_spec"] = spec
+            if mode == "online_dynamic":
+                e.delta_state = self._build_shared_dynamic_state(buf_X, buf_y, batch_sizes, model_cfg, spec=spec)
+            else:
+                e.delta_state = self._build_shared_inducing_state(buf_X, buf_y, model_cfg, spec=spec)
+            return
+        if mode in {"online_shared_mc_inducing", "online_shared_mc_inducing_refresh"}:
+            hist_info = self._shared_residual_history_for_reset(e, emulator, model_cfg)
+            if hist_info is None:
+                e.delta_state = None
+                return
+            X_hist, resid_hist = hist_info
+            if X_hist.shape[0] < self._delta_online_min_points(model_cfg):
+                e.delta_state = None
+                return
+            spec = e.delta_meta.get("delta_online_hyper_spec")
+            if spec is None:
+                spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+                e.delta_meta["delta_online_hyper_spec"] = spec
+            e.delta_state = self._build_shared_mc_inducing_state(X_hist, resid_hist, model_cfg, spec=spec)
+            e.delta_meta["mc_batches_since_refresh"] = 0
+            return
+        self._refit_shared_delta_from_history(e, emulator, model_cfg)
+
+    def _shared_residual_history_for_reset(
+        self,
+        e: Expert,
+        emulator: Emulator,
+        model_cfg: ModelConfig,
+    ):
+        if e.X_hist.numel() == 0 or e.y_hist.numel() == 0:
+            return None
+        resid = self._shared_batch_residual(e, e.X_hist, e.y_hist, emulator, model_cfg)
+        if resid is None:
+            return None
+        return e.X_hist, resid
+
+    def _update_shared_delta_online(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        if isinstance(e.delta_state, OnlineGPyTorchDeltaState):
+            e.delta_state.append(X_batch, resid_batch)
+            return
+        min_points = self._delta_online_min_points(model_cfg)
+        if buf_X.shape[0] < min_points:
+            e.delta_state = None
+            return
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        e.delta_state = OnlineGPyTorchDeltaState(buf_X, buf_y, spec)
+
+    def _update_shared_delta_bpc(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        max_buf = self._delta_dynamic_buffer_max_points(model_cfg)
+        if buf_X is not None and buf_X.shape[0] > max_buf:
+            buf_X, buf_y = self._trim_delta_online_buffer(e, max_buf)
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            min_points = self._delta_online_min_points(model_cfg)
+            if buf_X is None or buf_y is None or buf_X.shape[0] < min_points:
+                e.delta_state = None
+                return
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        if isinstance(e.delta_state, SharedBatchSupportOnlineBPCDeltaState):
+            e.delta_state.append(X_batch, resid_batch)
+            return
+        e.delta_state = self._build_shared_bpc_state(X_batch, resid_batch, model_cfg, spec=spec)
+
+    def _update_shared_delta_bpc_exact(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            min_points = self._delta_online_min_points(model_cfg)
+            if buf_X is None or buf_y is None or buf_X.shape[0] < min_points:
+                e.delta_state = None
+                return
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        if isinstance(e.delta_state, SharedExactOnlineBPCDeltaState):
+            e.delta_state.append(X_batch, resid_batch)
+            return
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return
+        e.delta_state = self._build_shared_exact_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+
+    def _update_shared_delta_bpc_exact_refithyper(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return
+        spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+        e.delta_meta["delta_online_hyper_spec"] = spec
+        e.delta_state = self._build_shared_exact_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+
+    def _update_shared_delta_bpc_proxy_refithyper(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        if isinstance(e.delta_state, SharedProxyDatasetOnlineBPCDeltaState):
+            e.delta_state.append(X_batch, resid_batch)
+            e.delta_meta["delta_online_hyper_spec"] = e.delta_state.hyper_spec
+            return
+        e.delta_state = self._build_shared_proxy_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+
+    def _update_shared_delta_bpc_proxy_stablemean(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        if isinstance(e.delta_state, SharedStableMeanProxyOnlineBPCDeltaState):
+            e.delta_state.append(X_batch, resid_batch)
+            e.delta_meta["delta_online_hyper_spec"] = e.delta_state.hyper_spec
+            return
+        e.delta_state = self._build_shared_proxy_stable_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+
+    def _update_shared_delta_bpc_fixedsupport_exact(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        if isinstance(e.delta_state, SharedFixedSupportOnlineBPCDeltaState):
+            e.delta_state.append(X_batch, resid_batch)
+            return
+        e.delta_state = self._build_shared_fixedsupport_exact_bpc_state(buf_X, buf_y, model_cfg, spec=spec)
+
+    def _update_shared_delta_dynamic(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        max_buf = self._delta_dynamic_buffer_max_points(model_cfg)
+        if buf_X.shape[0] > max_buf:
+            buf_X, buf_y = self._trim_delta_online_buffer(e, max_buf)
+        if isinstance(e.delta_state, DynamicBasisDeltaState):
+            e.delta_state.update_batch(X_batch, resid_batch, propagate_first=True)
+            return
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        e.delta_state = self._build_shared_dynamic_state(
+            buf_X,
+            buf_y,
+            e.delta_meta.get("delta_online_batch_sizes", []),
+            model_cfg,
+            spec=spec,
+        )
+
+    def _update_shared_delta_inducing(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        model_cfg: ModelConfig,
+    ) -> None:
+        buf_X, buf_y = self._append_delta_online_buffer(e, X_batch, resid_batch)
+        max_buf = self._delta_inducing_buffer_max_points(model_cfg)
+        if buf_X.shape[0] > max_buf:
+            buf_X, buf_y = self._trim_delta_online_buffer(e, max_buf)
+        if isinstance(e.delta_state, OnlineInducingGPyTorchDeltaState):
+            e.delta_state.append(X_batch, resid_batch)
+            return
+        min_points = self._delta_online_min_points(model_cfg)
+        if buf_X is None or buf_y is None or buf_X.shape[0] < min_points:
+            e.delta_state = None
+            return
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        e.delta_state = self._build_shared_inducing_state(buf_X, buf_y, model_cfg, spec=spec)
+
+    def _update_shared_mc_inducing(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        resid_batch: torch.Tensor,
+        emulator: Emulator,
+        model_cfg: ModelConfig,
+    ) -> None:
+        if not isinstance(e.delta_state, SharedMCInducingDeltaState):
+            hist_info = self._shared_residual_history_for_reset(e, emulator, model_cfg)
+            if hist_info is None:
+                e.delta_state = None
+                return
+            X_hist, resid_hist = hist_info
+            if X_hist.shape[0] < self._delta_online_min_points(model_cfg):
+                e.delta_state = None
+                return
+            spec = e.delta_meta.get("delta_online_hyper_spec")
+            if spec is None:
+                spec = self._fit_shared_online_hyper(X_hist, resid_hist, model_cfg)
+                e.delta_meta["delta_online_hyper_spec"] = spec
+            e.delta_state = self._build_shared_mc_inducing_state(X_hist, resid_hist, model_cfg, spec=spec)
+            e.delta_meta["mc_batches_since_refresh"] = 0
+            return
+        e.delta_state.update_weights_from_residual(X_batch, resid_batch)
+        e.delta_meta["mc_batches_since_refresh"] = int(e.delta_meta.get("mc_batches_since_refresh", 0)) + 1
+        refresh_every = self._delta_mc_refresh_every(model_cfg)
+        if refresh_every > 0 and e.delta_meta["mc_batches_since_refresh"] >= refresh_every:
+            self._reset_shared_delta_from_mode(e, emulator, model_cfg)
+
+    def _truncate_shared_online_delta(self, e: Expert, keep_n: int, model_cfg: ModelConfig) -> bool:
+        buf_X, buf_y = self._trim_delta_online_buffer(e, keep_n)
+        if buf_X is None or buf_y is None:
+            e.delta_state = None
+            return False
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None and buf_X.shape[0] >= self._delta_online_min_points(model_cfg):
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        if spec is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return False
+        e.delta_state = OnlineGPyTorchDeltaState(buf_X, buf_y, spec)
+        return True
+
+    def _truncate_shared_dynamic_delta(self, e: Expert, keep_n: int, model_cfg: ModelConfig) -> bool:
+        buf_X, buf_y = self._trim_delta_online_buffer(e, keep_n)
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return False
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        e.delta_state = self._build_shared_dynamic_state(
+            buf_X,
+            buf_y,
+            e.delta_meta.get("delta_online_batch_sizes", []),
+            model_cfg,
+            spec=spec,
+        )
+        return True
+
+    def _truncate_shared_inducing_delta(self, e: Expert, keep_n: int, model_cfg: ModelConfig) -> bool:
+        buf_X, buf_y = self._trim_delta_online_buffer(e, keep_n)
+        if buf_X is None or buf_y is None or buf_X.shape[0] < self._delta_online_min_points(model_cfg):
+            e.delta_state = None
+            return False
+        spec = e.delta_meta.get("delta_online_hyper_spec")
+        if spec is None:
+            spec = self._fit_shared_online_hyper(buf_X, buf_y, model_cfg)
+            e.delta_meta["delta_online_hyper_spec"] = spec
+        e.delta_state = self._build_shared_inducing_state(buf_X, buf_y, model_cfg, spec=spec)
+        return True
+
+    def _update_delta_after_batch(
+        self,
+        e: Expert,
+        X_batch: torch.Tensor,
+        Y_batch: torch.Tensor,
+        emulator: Emulator,
+        model_cfg: ModelConfig,
+        pf_diag: Dict[str, Any],
+    ) -> None:
+        del pf_diag
+        if not getattr(model_cfg, "refit_delta_every_batch", True):
+            return
+        mode = self._delta_update_mode(model_cfg)
+        if mode in {"online", "online_dynamic", "online_bpc", "online_bpc_exact", "online_bpc_exact_refithyper", "online_bpc_proxy_refithyper", "online_bpc_proxy_stablemean", "online_bpc_fixedsupport_exact", "online_inducing", "online_shared_mc_inducing", "online_shared_mc_inducing_refresh"}:
+            resid_batch = self._shared_batch_residual(e, X_batch, Y_batch, emulator, model_cfg)
+            if resid_batch is None:
+                return
+            if mode == "online_bpc":
+                self._update_shared_delta_bpc(e, X_batch, resid_batch, model_cfg)
+            elif mode == "online_bpc_exact":
+                self._update_shared_delta_bpc_exact(e, X_batch, resid_batch, model_cfg)
+            elif mode == "online_bpc_exact_refithyper":
+                self._update_shared_delta_bpc_exact_refithyper(e, X_batch, resid_batch, model_cfg)
+            elif mode == "online_bpc_proxy_refithyper":
+                self._update_shared_delta_bpc_proxy_refithyper(e, X_batch, resid_batch, model_cfg)
+            elif mode == "online_bpc_proxy_stablemean":
+                self._update_shared_delta_bpc_proxy_stablemean(e, X_batch, resid_batch, model_cfg)
+            elif mode == "online_bpc_fixedsupport_exact":
+                self._update_shared_delta_bpc_fixedsupport_exact(e, X_batch, resid_batch, model_cfg)
+            elif mode == "online_dynamic":
+                self._update_shared_delta_dynamic(e, X_batch, resid_batch, model_cfg)
+            elif mode == "online_inducing":
+                self._update_shared_delta_inducing(e, X_batch, resid_batch, model_cfg)
+            elif mode in {"online_shared_mc_inducing", "online_shared_mc_inducing_refresh"}:
+                self._update_shared_mc_inducing(e, X_batch, resid_batch, emulator, model_cfg)
+            else:
+                self._update_shared_delta_online(e, X_batch, resid_batch, model_cfg)
+            return
+        self._refit_shared_delta_from_history(e, emulator, model_cfg)
+
+    def _expert_theta_mean(self, e: Expert) -> torch.Tensor:
+        """PF posterior mean of theta for a single expert."""
+        ps: ParticleSet = e.pf.particles
+        w = ps.weights()       # [N]
+        theta = ps.theta       # [N, d]
+        return (w.view(-1, 1) * theta).sum(dim=0)  # [d]
+
+    # ------------------------------------------------------------------
+    # hazard helper
+    # ------------------------------------------------------------------
+    def _hazard(self, rl: int) -> float:
+        """
+        Use either constant hazard_rate (if present), or the `hazard` callable
+        in BOCPDConfig (default_hazard).
+        """
+        if hasattr(self.config, "hazard_rate"):
+            h = float(getattr(self.config, "hazard_rate"))
+            return h
+        # use callable hazard(r)
+        r_tensor = torch.tensor([rl], dtype=self.dtype, device=self.device)
+        val = self.config.hazard(r_tensor)[0].item()
+        # protect against 0 or >1
+        val = max(min(val, 1.0 - 1e-12), 1e-12)
+        return float(val)
+
+    def ump_batch(
+        self,
+        X_batch: torch.Tensor,
+        Y_batch: torch.Tensor,
+        emulator: Emulator,
+        model_cfg: ModelConfig,
+    ) -> List[float]:
+        """
+        对于 batch，给每个 expert 返回一个“平均 log predictive”。
+        """
+        out: List[float] = []
+        for e in self.experts:
+            ps: ParticleSet = e.pf.particles
+            try:
+                info = loglik_and_grads(
+                    Y_batch,
+                    X_batch,
+                    ps,
+                    emulator,
+                    e.delta_state,
+                    model_cfg.rho,
+                    model_cfg.sigma_eps,
+                    need_grads=False,
+                    # use_discrepancy=model_cfg.use_discrepancy,
+                    use_discrepancy=model_cfg.bocpd_use_discrepancy,
+                )
+            except:
+                info = loglik_and_grads(
+                    Y_batch,
+                    X_batch,
+                    ps,
+                    emulator,
+                    e.delta_state,
+                    model_cfg.rho,
+                    model_cfg.sigma_eps,
+                    need_grads=False,
+                    use_discrepancy=model_cfg.use_discrepancy,
+                    # use_discrepancy=model_cfg.bocpd_use_discrepancy,
+                )
+            # info["loglik"]: [batch_size, N]
+            loglik = torch.clamp(info["loglik"], min=-1e10, max=1e10)
+            logmix_per_t = torch.logsumexp(ps.logw.view(1, -1) + loglik, dim=1)  # [batch_size]
+            out.append(float(logmix_per_t.mean()))
+        return out
+
+    # ------------------------------------------------------------------
+    # prune: keep anchor + top mass experts
+    # ------------------------------------------------------------------
+    def _prune_keep_anchor(self, anchor_run_length: int, max_experts: int) -> None:
+        if len(self.experts) <= max_experts:
+            return
+
+        anchor_idx: Optional[int] = None
+        best_diff = 10**9
+        for i, e in enumerate(self.experts):
+            diff = abs(e.run_length - anchor_run_length)
+            if diff < best_diff:
+                best_diff = diff
+                anchor_idx = i
+
+        # sort by log_mass desc
+        sorted_idx = sorted(
+            range(len(self.experts)),
+            key=lambda i: self.experts[i].log_mass,
+            reverse=True,
+        )
+
+        kept: List[int] = []
+        for idx in sorted_idx:
+            if idx == anchor_idx or len(kept) < max_experts - 1:
+                kept.append(idx)
+            if len(kept) >= max_experts:
+                break
+        if anchor_idx is not None and anchor_idx not in kept:
+            kept[-1] = anchor_idx
+
+        kept = sorted(set(kept))
+        self.experts = [self.experts[i] for i in kept]
+
+
+    # ------------------------------------------------------------------
+    # batch update
+    # ------------------------------------------------------------------
+    def update_batch(
+        self,
+        X_batch: torch.Tensor,
+        Y_batch: torch.Tensor,
+        emulator: Emulator,
+        model_cfg: ModelConfig,
+        pf_cfg: PFConfig,
+        prior_sampler: Callable[[int], torch.Tensor],
+        verbose: bool = False,
+    ) -> Dict[str, Any]:
+
+        X_batch = X_batch.to(self.device, self.dtype)
+        Y_batch = Y_batch.to(self.device, self.dtype)
+        batch_size = X_batch.shape[0]
+        dx = X_batch.shape[1]
+
+        # 初始化
+        if len(self.experts) == 0:
+            e0 = self._spawn_new_expert(
+                model_cfg=model_cfg,
+                pf_cfg=pf_cfg,
+                prior_sampler=prior_sampler,
+                dx=dx,
+                log_mass=0.0,
+            )
+            self.experts.append(e0)
+            self.restart_start_time = 0
+            self.t = 0
+            self._last_restart_t = -10**9
+
+        # 1) per-expert log UMP over batch
+        log_umps = self.ump_batch(X_batch, Y_batch, emulator, model_cfg)
+        log_ump_map = {id(e): float(lu) for e, lu in zip(self.experts, log_umps)}
+        log_umps_t = torch.tensor(log_umps, device=self.device, dtype=self.dtype)
+
+        # === Snapshot BEFORE any mass update / append / prune / restart ===
+        experts_pre = list(self.experts)                 # old experts only
+        log_umps_pre = list(log_umps)                    # aligned with experts_pre
+        idx_pre = {id(e): i for i, e in enumerate(experts_pre)}
+
+        # We cannot select anchor/cand yet because they depend on t_now and masses,
+        # but we can provide a helper to fetch log_ump later for any pre-expert:
+        def get_pre_log_ump(e):
+            j = idx_pre.get(id(e), None)
+            return None if j is None else float(log_umps_pre[j])
+
+        # 2) mass update
+        prev_log_mass = torch.tensor(
+            [e.log_mass for e in self.experts], device=self.device, dtype=self.dtype
+        )
+        hazards = torch.tensor(
+            [self._hazard(e.run_length) for e in self.experts],
+            device=self.device,
+            dtype=self.dtype,
+        )
+        log_h = torch.log(hazards.clamp_min(1e-12))
+        log_1mh = torch.log((1.0 - hazards).clamp_min(1e-12))
+
+        growth_log_mass = prev_log_mass + log_1mh + log_umps_t
+        cp_log_mass = torch.logsumexp(prev_log_mass + log_h + log_umps_t, dim=0)
+
+        for i, e in enumerate(self.experts):
+            # e.run_length = min(e.run_length + batch_size, self.config.max_run_length)
+            e.run_length += batch_size
+            e.log_mass = float(growth_log_mass[i])
+
+        new_e = self._spawn_new_expert(
+            model_cfg=model_cfg,
+            pf_cfg=pf_cfg,
+            prior_sampler=prior_sampler,
+            dx=dx,
+            log_mass=float(cp_log_mass),
+        )
+        self.experts.append(new_e)
+
+        masses = torch.tensor(
+            [e.log_mass for e in self.experts], device=self.device, dtype=self.dtype
+        )
+        log_Z = torch.logsumexp(masses, dim=0)
+        masses = masses - log_Z
+        for i, e in enumerate(self.experts):
+            e.log_mass = float(masses[i])
+
+        # 3) restart decision
+        t_now = self.t + batch_size
+        r_old = self.restart_start_time
+        anchor_rl = max(t_now - r_old, 0)
+
+        # anchor_e = next((e for e in self.experts if e.run_length == anchor_rl), None)
+        anchor_e = self._closest_by_run_length(anchor_rl)
+
+        p_anchor = math.exp(anchor_e.log_mass) if anchor_e is not None else 0.0
+
+        best_other_mass = 0.0
+        s_star: Optional[int] = None
+        cand_e: Optional[Expert] = None
+        for e in self.experts:
+            rl = e.run_length
+            s = t_now - rl
+            if s > r_old:
+                m = math.exp(e.log_mass)
+                if m > best_other_mass:
+                    best_other_mass = m
+                    s_star = int(s)
+                    cand_e = e
+
+        r0_e = next((e for e in self.experts if e.run_length == 0), None)
+        p_cp = math.exp(r0_e.log_mass) if r0_e is not None else 0.0
+
+        did_restart = False
+        msg_mode = "NO_RESTART"
+
+        theta_pass = False
+        theta_stat = None
+        
+        if self.restart_criteria == "theta_test" and anchor_e is not None and cand_e is not None:
+            method = getattr(self.config, "restart_theta_test", "energy")
+            if method == "credible":
+                z = float(getattr(self.config, "restart_cred_z", 2.0))
+                frac = float(getattr(self.config, "restart_cred_frac", 0.5))
+                rate, theta_pass = self._credible_nonoverlap(anchor_e, cand_e, z, frac)
+                theta_stat = rate
+            elif method == "sw":
+                n_proj = int(getattr(self.config, "restart_sw_proj", 32))
+                theta_stat = self._sliced_wasserstein(anchor_e, cand_e, n_proj)
+                tau = float(getattr(self.config, "restart_theta_tau", 0.1))
+                theta_pass = (theta_stat > tau)
+            else:
+                theta_stat = self._energy_distance(anchor_e, cand_e)
+                tau = float(getattr(self.config, "restart_theta_tau", 0.1))
+                theta_pass = (theta_stat > tau)
+        elif self.restart_criteria != "theta_test":
+            theta_pass = True
+            theta_stat = 0.0
+
+        if (
+            getattr(self.config, "use_restart", True)
+            and s_star is not None
+            and theta_pass
+            and best_other_mass > p_anchor * (1.0 + self.restart_margin)
+            and (t_now - self._last_restart_t) >= self.restart_cooldown
+        ):
+            did_restart = True
+            # --------- DEBUG: print top-5 experts BEFORE restart ----------
+            print(f"\n[DEBUG BEFORE RESTART] t={t_now}, r_old={r_old}, s_star={s_star}")
+            print(f"  p_anchor={p_anchor:.6f}, best_other_mass={best_other_mass:.6f}, p_cp={p_cp:.6f}")
+            print("  Top-5 experts BEFORE restart:")
+            print(f"  theta_test={getattr(self.config,'restart_theta_test','energy')} stat={theta_stat} pass={theta_pass}")
+
+            
+            # 取 log_mass 排序
+            sorted_experts = sorted(
+                self.experts,
+                key=lambda e: e.log_mass,
+                reverse=True
+            )
+
+            for i, e in enumerate(sorted_experts[:5]):
+                theta_mean = self._expert_theta_mean(e).detach().cpu().numpy()
+                print(f"    Expert[{i}] rl={e.run_length}, mass={math.exp(e.log_mass):.6f}, theta_mean={theta_mean}")
+            print("--------------------------------------------------------\n")
+            self._last_restart_t = t_now
+
+            if getattr(self.config, "use_backdated_restart", False):
+                self.restart_start_time = int(s_star)
+                new_anchor_rl = max(t_now - self.restart_start_time, 0)
+                keep_e = next(
+                    (e for e in self.experts if e.run_length == new_anchor_rl),
+                    None,
+                )
+                if keep_e is None and len(self.experts) > 0:
+                    keep_e = min(
+                        self.experts,
+                        key=lambda e: abs(e.run_length - new_anchor_rl),
+                    )
+                    keep_e.run_length = new_anchor_rl
+                self.experts = [keep_e] if keep_e is not None else self.experts[:1]
+                msg_mode = "BACKDATED r←s*"
+            else:
+                self.restart_start_time = t_now
+                r0 = self._spawn_new_expert(
+                    model_cfg=model_cfg,
+                    pf_cfg=pf_cfg,
+                    prior_sampler=prior_sampler,
+                    dx=dx,
+                    log_mass=0.0,
+                )
+                self.experts = [r0]
+                msg_mode = "ALGO2 r←t+1"
+
+            if self.on_restart is not None and self.notify_on_restart:
+                self.on_restart(
+                    int(t_now),
+                    int(self.restart_start_time),
+                    int(s_star) if s_star is not None else None,
+                    int(anchor_rl),
+                    float(p_anchor),
+                    float(best_other_mass),
+                )
+
+        # 没有 restart 时进行 prune
+        if not did_restart:
+            anchor_run_length = max(t_now - self.restart_start_time, 0)
+            self._prune_keep_anchor(anchor_run_length, self.config.max_experts)
+
+        # 4) 历史 + PF + delta updates
+        for e in self.experts:
+            self._append_hist_batch(e, X_batch, Y_batch, self.config.max_run_length)
+
+        pf_diags = []
+        for e in self.experts:
+            diag = e.pf.step_batch(
+                X_batch,
+                Y_batch,
+                emulator,
+                e.delta_state,
+                model_cfg.rho,
+                model_cfg.sigma_eps,
+                grad_info=False,
+                use_discrepancy=model_cfg.use_discrepancy,
+            )
+            pf_diags.append(diag)
+            # print(e.run_length, diag["ess"], diag["gini"])
+
+            self._update_delta_after_batch(
+                e,
+                X_batch,
+                Y_batch,
+                emulator,
+                model_cfg,
+                diag,
+            )
+            # e.delta_state = OnlineGPState(
+            #     X=X_hist,
+            #     y=resid_all,
+            #     kernel=make_kernel(model_cfg.delta_kernel),
+            #     noise=model_cfg.delta_kernel.noise,
+            #     # noise=noise_vec,
+            #     update_mode="exact_full",
+            #     hyperparam_mode="fit",
+            # )
+            # e.delta_state.refit_hyperparams()
+            # mu_eta_all, _ = emulator.predict(X_batch, e.pf.particles.theta)  # shape [M, N]
+            # weights = e.pf.particles.weights().view(1, -1)  # [1, N]
+            # eta_mix_all = (weights * mu_eta_all).sum(dim=1)  # [M]
+            # resid_all = Y_batch - model_cfg.rho * eta_mix_all
+
+            # # 3. 完全重写 delta_state
+            # e.delta_state = OnlineGPState(
+            #     X=X_batch,
+            #     y=resid_all,
+            #     kernel=make_kernel(model_cfg.delta_kernel),
+            #     noise=model_cfg.delta_kernel.noise,
+            #     update_mode="exact_full",
+            #     hyperparam_mode="fit",
+            # )
+            # e.delta_state.refit_hyperparams()
+
+        # 5) delta refit
+        self.t += batch_size
+
+        masses_np = [math.exp(e.log_mass) for e in self.experts]
+        entropy = -sum(m * math.log(m + 1e-12) for m in masses_np)
+
+        if log_umps:
+            self.prev_max_ump = max(log_umps)
+
+        # experts_debug
+        experts_debug: List[Dict[str, Any]] = []
+        for idx, e in enumerate(self.experts):
+            try:
+                theta_mean = self._expert_theta_mean(e)
+                theta_mean_list = theta_mean.detach().cpu().tolist()
+            except Exception:
+                theta_mean_list = None
+            mass = math.exp(e.log_mass)
+            log_ump_val = float(log_umps[idx]) if idx < len(log_umps) else None
+            experts_debug.append(
+                {
+                    "index": idx,
+                    "run_length": int(e.run_length),
+                    "start_time": int(t_now - e.run_length),
+                    "log_mass": float(e.log_mass),
+                    "mass": float(mass),
+                    "theta_mean": theta_mean_list,
+                    "log_ump": log_ump_val,
+                }
+            )
+
+        if did_restart:
+
+            print(
+                f"[R-BOCPD][batch] Restart ending at t={t_now}: "
+                f"mode={msg_mode}, r_old={r_old}, r_new={self.restart_start_time}, "
+                f"s_star={s_star}, p_anchor={p_anchor:.4g}, p_cp={p_cp:.4g}"
+            )
+            for info in experts_debug:
+                print(
+                    f"  expert#{info['index']}: "
+                    f"rl={info['run_length']}, start={info['start_time']}, "
+                    f"mass={info['mass']:.4g}, log_ump={info['log_ump']}"
+                )
+
+        
+        # === LLR diagnostics consistent with BOCPD decision timing ===
+        def _single_expert_log_ump(e: Expert) -> float:
+            ps: ParticleSet = e.pf.particles
+            info = loglik_and_grads(
+                Y_batch, X_batch, ps, emulator,
+                e.delta_state, model_cfg.rho, model_cfg.sigma_eps,
+                need_grads=False, use_discrepancy=model_cfg.use_discrepancy,
+            )
+            loglik = torch.clamp(info["loglik"], min=-1e10, max=1e10)
+            logmix = torch.logsumexp(ps.logw.view(1, -1) + loglik, dim=1)
+            return float(logmix.mean().item())
+
+        log_ump_anchor = None
+        log_ump_cand = None
+
+        if anchor_e is not None:
+            log_ump_anchor = get_pre_log_ump(anchor_e)
+            if log_ump_anchor is None:
+                # anchor might have been replaced by closest-by-runlength after append/prune
+                log_ump_anchor = _single_expert_log_ump(anchor_e)
+
+        if cand_e is not None:
+            log_ump_cand = get_pre_log_ump(cand_e)
+            if log_ump_cand is None:
+                # very common: cand is the newly spawned run_length=0 expert
+                log_ump_cand = _single_expert_log_ump(cand_e)
+
+        delta_ll_pair = None
+        if (log_ump_anchor is not None) and (log_ump_cand is not None):
+            delta_ll_pair = float(log_ump_cand - log_ump_anchor)
+
+        # log posterior odds used by restart condition (mass already updated)
+        log_odds_mass = None
+        if anchor_e is not None and cand_e is not None:
+            log_odds_mass = float(cand_e.log_mass - anchor_e.log_mass)
+
+        h_log = float(math.log1p(self.restart_margin))
+
+        out = dict(
+            delta_ll_pair=delta_ll_pair,
+            log_odds_mass=log_odds_mass,
+            h_log=h_log,
+            log_ump_anchor=log_ump_anchor,
+            log_ump_cand=log_ump_cand,
+        )
+
+        return {
+            "p_anchor": p_anchor,
+            "p_cp": p_cp,
+            "num_experts": len(self.experts),
+            "experts_log_mass": [float(e.log_mass) for e in self.experts],
+            "pf_diags": pf_diags,
+            # "did_delta_refit": did_refit,
+            "did_restart": did_restart,
+            "restart_start_time": int(self.restart_start_time),
+            "s_star": int(s_star) if s_star is not None else None,
+            "log_umps": [float(v) for v in log_umps],
+            "log_Z": float(log_Z),
+            "entropy": float(entropy),
+            "experts_debug": experts_debug,
+            "anchor_rl": int(anchor_e.run_length) if anchor_e is not None else None,
+            "cand_rl": int(cand_e.run_length) if cand_e is not None else None,
+            **out,
+        }
+
+    # ------------------------------------------------------------------
+    # theta test
+    # ------------------------------------------------------------------
+
+    def _theta_particles(self, e: Expert):
+        """Return (theta [N,d], w [N]) for expert e."""
+        ps: ParticleSet = e.pf.particles
+        theta = ps.theta.detach()  # [N,d]
+        w = ps.weights().detach()  # [N], sum=1
+        w = w / (w.sum() + 1e-12)
+        return theta, w
+
+    def _weighted_mean_var(self, theta: torch.Tensor, w: torch.Tensor):
+        """theta [N,d], w [N] -> mean [d], var [d]."""
+        w = w.view(-1, 1)                      # [N,1]
+        mu = (w * theta).sum(dim=0)            # [d]
+        diff2 = (theta - mu).pow(2)            # [N,d]
+        var = (w * diff2).sum(dim=0)           # [d]
+        return mu, var
+
+    def _credible_nonoverlap(self, e1: Expert, e2: Expert, z: float = 2.0, frac: float = 0.5):
+        """
+        Credible interval non-overlap test.
+        Return True if >= frac dims have non-overlapping [mu±z*sd].
+        """
+        th1, w1 = self._theta_particles(e1)
+        th2, w2 = self._theta_particles(e2)
+        mu1, var1 = self._weighted_mean_var(th1, w1)
+        mu2, var2 = self._weighted_mean_var(th2, w2)
+        sd1 = torch.sqrt(var1 + 1e-12)
+        sd2 = torch.sqrt(var2 + 1e-12)
+        lo1, hi1 = mu1 - z * sd1, mu1 + z * sd1
+        lo2, hi2 = mu2 - z * sd2, mu2 + z * sd2
+        nonoverlap = (hi1 < lo2) | (hi2 < lo1)  # [d]
+        rate = nonoverlap.float().mean().item()
+        return rate, (rate >= frac)
+
+    def _energy_distance(self, e1: Expert, e2: Expert, eps: float = 1e-12):
+        """
+        Weighted energy distance between two weighted empirical distributions.
+        Works for multi-dim theta.
+        D = 2E||X-Y|| - E||X-X'|| - E||Y-Y'||
+        Return scalar.
+        Complexity O(N^2). Use only if N not huge; otherwise subsample.
+        """
+        X, a = self._theta_particles(e1)  # [N,d], [N]
+        Y, b = self._theta_particles(e2)
+        # pairwise norms
+        # ||X-Y||
+        XY = torch.cdist(X, Y, p=2)  # [N,N]
+        XX = torch.cdist(X, X, p=2)
+        YY = torch.cdist(Y, Y, p=2)
+
+        a2 = a.view(-1, 1)
+        b2 = b.view(-1, 1)
+
+        Exy = (a2 * b.view(1, -1) * XY).sum()
+        Exx = (a2 * a.view(1, -1) * XX).sum()
+        Eyy = (b2 * b.view(1, -1) * YY).sum()
+
+        D = 2.0 * Exy - Exx - Eyy
+        return float(D.clamp_min(0.0).item())
+
+    def _sliced_wasserstein(self, e1: Expert, e2: Expert, n_proj: int = 32, eps: float = 1e-12):
+        """
+        Approx sliced Wasserstein-1 for weighted particles.
+        For each random projection u: compare 1D projected distributions.
+        Implementation uses weighted quantile approximation by sorting.
+        Return average W1 over projections.
+        """
+        X, a = self._theta_particles(e1)
+        Y, b = self._theta_particles(e2)
+        d = X.shape[1]
+        # random projections
+        U = torch.randn(n_proj, d, device=X.device, dtype=X.dtype)
+        U = U / (U.norm(dim=1, keepdim=True) + eps)  # [P,d]
+
+        def w1_1d(x, w, y, v):
+            # x,y: [N], w,v: [N]
+            xs, ix = torch.sort(x)
+            ws = w[ix]
+            ys, iy = torch.sort(y)
+            vs = v[iy]
+            # cumulative
+            cwx = torch.cumsum(ws, dim=0)
+            cwy = torch.cumsum(vs, dim=0)
+            # common grid: merge cdfs at all jump points (approx)
+            grid = torch.unique(torch.cat([cwx, cwy], dim=0))
+            # inverse CDF via searchsorted
+            ixg = torch.searchsorted(cwx, grid, right=True).clamp(0, len(xs)-1)
+            iyg = torch.searchsorted(cwy, grid, right=True).clamp(0, len(ys)-1)
+            qx = xs[ixg]
+            qy = ys[iyg]
+            # integral of |F^{-1}-G^{-1}| over u in [0,1] using Riemann sum
+            du = torch.cat([grid[:1], grid[1:] - grid[:-1]], dim=0)
+            return (du * (qx - qy).abs()).sum()
+
+        W = 0.0
+        for p in range(n_proj):
+            u = U[p]  # [d]
+            x1 = (X @ u)  # [N]
+            x2 = (Y @ u)
+            W += w1_1d(x1, a, x2, b)
+        return float((W / n_proj).item())
+
+    def _closest_by_run_length(self, target_rl: int) -> Optional[Expert]:
+        if len(self.experts) == 0:
+            return None
+        return min(self.experts, key=lambda e: abs(e.run_length - target_rl))
