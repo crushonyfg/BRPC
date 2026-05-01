@@ -18,30 +18,27 @@ notebooks/    Exploratory notebooks, not required for reproduction.
 scratch/      Temporary diagnostics and historical one-off scripts.
 ```
 
-The implementation is still import-compatible as `calib`. New user-facing code
-can import stable objects from `brpc`.
-
 ## Installation
 
-The expected runtime environment is the `jumpGP` conda environment.
+The expected runtime environment is the `BRPC` conda environment.
 
 ```bash
 conda env create -f environment.yml
-conda activate jumpGP
+conda activate BRPC
 pip install -e .
 ```
 
-If you already have `jumpGP`, install the repo in editable mode:
+If you already have `BRPC`, install the repo in editable mode:
 
 ```bash
-conda activate jumpGP
+conda activate BRPC
 pip install -e .
 ```
 
 Quick syntax check:
 
 ```bash
-conda run -n jumpGP python -m py_compile calib/delta_gp.py calib/online_calibrator.py calib/run_synthetic_suddenCmp_tryThm.py
+conda run -n BRPC python -m py_compile calib/delta_gp.py calib/online_calibrator.py calib/run_synthetic_suddenCmp_tryThm.py
 ```
 
 ## Minimal API Example
@@ -53,7 +50,7 @@ from brpc import CalibrationConfig, DeterministicSimulator, OnlineBayesCalibrato
 For experiment commands:
 
 ```bash
-conda run -n jumpGP python -m brpc.experiments
+conda run -n BRPC python -m brpc.experiments
 ```
 
 ## Main Experiment Entrypoints
@@ -61,43 +58,43 @@ conda run -n jumpGP python -m brpc.experiments
 Synthetic abrupt changepoints:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_suddenCmp_tryThm --profile main --out_dir figs/sudden_main
-conda run -n jumpGP python -m calib.run_synthetic_suddenCmp_tryThm --profile ablation --out_dir figs/sudden_ablation
+conda run -n BRPC python -m calib.run_synthetic_suddenCmp_tryThm --profile main --out_dir figs/sudden_main
+conda run -n BRPC python -m calib.run_synthetic_suddenCmp_tryThm --profile ablation --out_dir figs/sudden_ablation
 ```
 
 Synthetic slope / drift:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile main --out_dir figs/slope_main
-conda run -n jumpGP python -m calib.run_synthetic_slope_deltaCmp --profile ablation --out_dir figs/slope_ablation
+conda run -n BRPC python -m calib.run_synthetic_slope_deltaCmp --profile main --out_dir figs/slope_main
+conda run -n BRPC python -m calib.run_synthetic_slope_deltaCmp --profile ablation --out_dir figs/slope_ablation
 ```
 
 Mixed theta trajectories:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --preview_only --out_dir figs/mixed_preview
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --profile main --out_dir figs/mixed_main
-conda run -n jumpGP python -m calib.run_synthetic_mixed_thetaCmp --profile ablation --out_dir figs/mixed_ablation
+conda run -n BRPC python -m calib.run_synthetic_mixed_thetaCmp --preview_only --out_dir figs/mixed_preview
+conda run -n BRPC python -m calib.run_synthetic_mixed_thetaCmp --profile main --out_dir figs/mixed_main
+conda run -n BRPC python -m calib.run_synthetic_mixed_thetaCmp --profile ablation --out_dir figs/mixed_ablation
 ```
 
 PlantSim / factory data:
 
 ```bash
-conda run -n jumpGP python -m calib.run_plantSim_v3_std --help
-conda run -n jumpGP python -m calib.run_plantSim_v3_std --csv physical_data.csv --out_dir figs/plantSim/v3_std --modes 0 1 2
+conda run -n BRPC python -m calib.run_plantSim_v3_std --help
+conda run -n BRPC python -m calib.run_plantSim_v3_std --csv physical_data.csv --out_dir figs/plantSim/v3_std --modes 0 1 2
 ```
 
 High-dimensional projected diagnostics:
 
 ```bash
-conda run -n jumpGP python -m calib.run_synthetic_highdim_projected_diag --help
+conda run -n BRPC python -m calib.run_synthetic_highdim_projected_diag --help
 ```
 
 RCAM diagnostics:
 
 ```bash
-conda run -n jumpGP python -m calib.run_rcam6d_bocpd_pf --help
-conda run -n jumpGP python -m calib.run_rcam6d_hybrid_rolled --help
+conda run -n BRPC python -m calib.run_rcam6d_bocpd_pf --help
+conda run -n BRPC python -m calib.run_rcam6d_hybrid_rolled --help
 ```
 
 ## Key Method Knobs
@@ -135,7 +132,7 @@ and `--plot_dir`.
 
 ## Development Notes
 
-- Use `conda run -n jumpGP ...` for validation.
+- Use `conda run -n BRPC ...` for validation.
 - Keep old behavior as the default; add new variants through explicit method
   names or config switches.
 - When changing rolled-CUSUM, discrepancy, restart, refresh, or runner semantics,
